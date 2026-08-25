@@ -1,0 +1,602 @@
+---
+title: "Bases de Dados do Pipeline de Identificação de Favelas"
+subtitle: "Documentação didática das fontes de dados, scripts e reprodutibilidade"
+author: "LabGeo"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-location: left
+    number-sections: true
+    theme: cosmo
+    code-fold: true
+    code-tools: true
+    df-print: paged
+execute:
+  eval: false
+  echo: true
+---
+
+# Objetivo deste documento
+
+Este documento reúne, em um único lugar, a explicação de **cada base de
+dados** usada no pipeline de identificação de favelas e comunidades urbanas,
+qual **script** a processa, qual **arquivo `.rds`** ela produz, e como cada
+uma se conecta às variáveis descritas na **Tabela 1** do artigo:
+
+> Nascimento, G. A., Giannotti, M., Regueira, T. A., & Tomasiello, D. B.
+> (2025). *Identifying slum areas: A multidimensional analysis leveraging
+> with explanatory machine learning techniques*. Sustainable Cities and
+> Society, 131, 106645.
+
+A ideia é que qualquer pessoa da equipe — mesmo sem ter escrito o código —
+consiga entender **o que cada base representa, por que ela foi escolhida, e
+como reproduzir o resultado do zero**.
+
+## Como ler este documento
+
+Cada seção segue a mesma estrutura:
+
+1. **O que é a base** — explicação em linguagem simples, sem jargão técnico.
+2. **Por que ela está no modelo** — a que dimensão da Tabela 1 do artigo ela
+   corresponde (Social, Físico, Ambiental, Características Urbanas).
+3. **De onde vem** — a fonte oficial dos dados.
+4. **Como é processada** — resumo do que o script faz, sem repetir o código
+   linha a linha (o código-fonte comentado já cobre isso).
+5. **Script e saída** — nome do arquivo `.R` e do `.rds` gerado, para
+   localizar rapidamente no repositório.
+6. **Reprodutibilidade** — parâmetros que, se mudados, alteram o resultado
+   (limiares, resoluções, CRS), e o que verificar se algo der errado.
+
+# Visão geral do pipeline
+
+O pipeline segue exatamente a estrutura da **Fig. 1** do artigo: dados de
+entrada → pré-processamento (com fusão de dados) → dataset final em grid
+hexagonal → classificação. Cada bloco abaixo corresponde a um script já
+implementado.
+
+```{mermaid}
+%%| fig-cap: "Fluxo geral do pipeline: da extração do grid até o dataset social"
+flowchart TD
+    A["01 · Extração do Grid H3\n(grid_dasimetrico.rds)"] --> G["Grid H3\nunidade de análise"]
+    B["02 · Preparação do CNEFE\n(ibge_cnefe.rds)"] --> A
+    G --> C["03 · Variável Alvo (is_slum)\nfavelas_e_comunidades...rds"]
+    G --> D["04 · Topodata (declividade)\ntopodata_declividade.rds"]
+    G --> E["05 · OpenStreetMap (físico)\nopen_street_maps.rds"]
+    G --> F["06 · Open Buildings (morfologia)\nopen_buildings.rds"]
+    G --> H["07 · Censo 2022 (infraestrutura)\nibge_censo.rds"]
+    H --> I["08/09/10 · Interpolação Dasimétrica\n(3 métodos)"]
+    I --> J["11 · Comparação dos Métodos\nibge_social_comparativo_metodos.rds"]
+    C & D & E & F & J --> K["Dataset Hexagonal Final\n(Table 1 do artigo)"]
+```
+
+A **unidade de análise** é a mesma do artigo: grid **H3, resolução 10**, com
+área média de hexágono de **15.047,5 m²** (Seção 3.3 do artigo) — se essa
+área média não bater no seu resultado, é sinal de que a resolução do H3 foi
+alterada em algum ponto do pipeline.
+
+# 01 · Grid Hexagonal H3 (unidade de análise) {#sec-grid}
+
+**O que é:** uma malha de hexágonos que cobre a área urbana do município.
+Pense nela como um "papel quadriculado" espacial — só que com hexágonos em
+vez de quadrados, porque hexágonos têm a vantagem de ter vizinhos à mesma
+distância em todas as direções (um quadrado tem vizinhos mais perto na
+diagonal e mais longe no lado).
+
+**Por que está no modelo:** é a unidade de análise de todo o artigo (Fig. 1,
+caixa "Unit of Analysis"). Todas as outras bases de dados são agregadas para
+dentro dessa malha — é o "recipiente" comum que permite juntar fontes tão
+diferentes quanto imagem de satélite, Censo e OpenStreetMap.
+
+**De onde vem:** os hexágonos são gerados computacionalmente pela biblioteca
+H3 (originalmente do Uber), sobre o contorno dos setores censitários urbanos
+do IBGE (`{geobr}`, ano 2022).
+
+**Como é processado:**
+
+1. Baixa os setores censitários do município e filtra só a área **Urbana**.
+2. Une esses setores num contorno único (com `st_make_valid()` para corrigir
+   geometrias problemáticas antes da união).
+3. Preenche esse contorno com hexágonos H3 de resolução 10.
+4. Aplica um **filtro dasimétrico**: mantém só os hexágonos que têm pelo
+   menos um domicílio no CNEFE (@sec-cnefe) — hexágonos sobre parques,
+   represas ou áreas rurais são descartados. É exatamente o que o artigo
+   chama de "Dasymetric mapping" na Fig. 1.
+
+**Script e saída:**
+
+| | |
+|---|---|
+| Script | `01_extracao_dados.R` |
+| Saída | `data/processed/grid_dasimetrico.rds` |
+| Depende de | `ibge_cnefe.rds` (script 02) |
+
+**Reprodutibilidade:**
+
+- `resolucao_escolhida <- 10` — mudar esse número muda a área de todos os
+  hexágonos do projeto inteiro. O artigo usa resolução 10 (~15.000 m² por
+  hexágono); não altere sem atualizar essa referência em todos os scripts
+  posteriores.
+- `sp_` (código do município IBGE) — hoje fixo em São Paulo (`3550308`);
+  aceita uma lista de códigos para regiões metropolitanas.
+
+# 02 · CNEFE — Cadastro Nacional de Endereços {#sec-cnefe}
+
+**O que é:** o "catálogo de endereços" do IBGE — uma lista de todos os
+endereços do Brasil, cada um com um ponto de latitude/longitude e uma
+classificação do que existe naquele endereço (domicílio, escola, comércio,
+etc.). É a base que o IBGE usa para saber onde bater de porta em porta no
+Censo.
+
+**Por que está no modelo:** o artigo usa o CNEFE para o **dasymetric
+mapping** (Fig. 1) — decidir quais hexágonos são realmente habitados. Sem
+isso, o modelo tentaria classificar hexágonos vazios (parques, água,
+terrenos baldios) como se fossem áreas urbanas normais.
+
+**De onde vem:** IBGE, Censo Demográfico 2022 — arquivo público por UF.
+
+**Como é processado:**
+
+1. Lê o CSV bruto da UF (ex.: `35_SP.csv`), já filtrando as colunas
+   necessárias (evita carregar informação irrelevante na memória).
+2. Filtra apenas o(s) município(s) de estudo.
+3. Recodifica os códigos numéricos do IBGE em categorias legíveis
+   (`"1" -> "domicilio particular"`, etc.).
+4. Mantém **apenas domicílios particulares** — descarta comércio, escolas,
+   igrejas, edificações em construção.
+5. Converte latitude/longitude em pontos espaciais (`sf`), descartando
+   coordenadas ausentes, zeradas `(0,0)`, ou fora do bounding box do Brasil.
+
+**Script e saída:**
+
+| | |
+|---|---|
+| Script | `02_preparacao_cnefe.R` |
+| Saída | `data/processed/ibge_cnefe.rds` |
+| Usado por | `01_extracao_dados.R` (filtro dasimétrico do grid) |
+
+**Reprodutibilidade:**
+
+- O bounding box de coordenadas (`latitude_num >= -35 & <= 5`, `longitude_num
+  >= -75 & <= -34`) é uma checagem de sanidade para o Brasil inteiro — não
+  precisa mudar ao trocar de município, só ao sair do território nacional.
+- Se o `message("Registros finais: ...")` mostrar um número muito menor do
+  que o esperado, o motivo mais comum é código de município errado no
+  parâmetro `codigo_municipio`.
+
+# 03 · Variável Alvo — `is_slum` (Favelas e Comunidades Urbanas) {#sec-target}
+
+**O que é:** o **rótulo que o modelo aprende a prever**. Não é uma variável
+preditora — é a "resposta certa" usada para treinar e validar o modelo,
+equivalente à Seção 3.3 do artigo.
+
+**Por que está no modelo:** corresponde à linha "Slum and Communities" da
+Tabela 1 do artigo (tipo *Social*, fonte *IBGE Population Census 2022*,
+"Polygons intersection").
+
+**De onde vem:** base "Favelas e Comunidades Urbanas" do IBGE (Censo 2022) —
+os polígonos oficiais de assentamentos informais.
+
+**Como é processado:**
+
+1. Calcula a interseção geométrica entre cada hexágono e os polígonos de
+   favela.
+2. Soma a área de favela dentro de cada hexágono e calcula o **percentual de
+   cobertura**.
+3. Classifica como `"Slum"` os hexágonos com cobertura **≥ 70%** — o mesmo
+   limiar que o artigo escolheu após a análise de sensibilidade do Apêndice
+   A (testando de 10% a 70%, com o 70% produzindo o melhor trade-off:
+   92% de recall e 1,18% de falsos positivos).
+
+Além da definição do artigo (área pura), o script também calcula uma
+segunda definição **ponderada por edificação** (via Open Buildings,
+@sec-buildings), como material de comparação — não é usada no artigo
+original, mas ajuda a avaliar o quanto a escolha do critério de
+classificação muda o resultado.
+
+**Script e saída:**
+
+| | |
+|---|---|
+| Script | `03_variavel_alvo_is_slum.R` |
+| Saídas | `favelas_e_comunidades_urbanas_area_pura.rds` (usa o critério do artigo) e `favelas_e_comunidades_urbanas_ponderado_edificacoes.rds` (alternativo) |
+| Depende de | `grid_dasimetrico.rds` (script 01) |
+
+**Reprodutibilidade:**
+
+- `limiar_classificacao <- 0.70` — é o parâmetro mais sensível de todo o
+  pipeline. Qualquer alteração aqui muda o que conta como "Slum" em todos os
+  scripts seguintes que usam o rótulo (ex.: script 11, diagnóstico
+  orientado ao alvo). Se for testar outro limiar, documente a mudança e
+  refaça a análise de sensibilidade (Apêndice A do artigo tem a referência
+  metodológica completa).
+
+# 04 · Topodata — Declividade do Terreno {#sec-topodata}
+
+**O que é:** um raster (imagem em grade, como uma foto, mas onde cada
+"pixel" guarda um valor numérico) com a declividade do terreno, derivado de
+um Modelo Digital de Superfície do INPE.
+
+**Por que está no modelo:** corresponde à linha "Average slope" da Tabela 1
+(tipo *Environmental*, fonte *TOPO DATA*, resolução 15 m). O artigo destaca
+que o terreno influencia onde assentamentos informais se formam —
+frequentemente em áreas de encosta, menos disputadas pelo mercado formal.
+
+**De onde vem:** projeto TOPODATA do INPE (Valeriano, 2008), derivado de
+imagens SRTM.
+
+**Como é processado:**
+
+1. Importa e mosaica os arquivos `.tif` que cobrem a área de estudo.
+2. Corrige o CRS declarado nos metadados (instável em arquivos antigos do
+   INPE).
+3. Recorta o raster aos limites do grid (economiza memória).
+4. Calcula a **média de declividade** dentro de cada hexágono (estatística
+   zonal).
+
+**Script e saída:**
+
+| | |
+|---|---|
+| Script | `04_topodata_agregacao_h3.R` |
+| Saída | `data/processed/topodata_declividade.rds` |
+| Depende de | `grid_dasimetrico.rds` (script 01) |
+
+**Reprodutibilidade:**
+
+- O CRS de destino (`EPSG:4674`, SIRGAS 2000) precisa ser o mesmo usado pelo
+  grid — se algum script for alterado para usar outro datum, este também
+  precisa ser atualizado.
+- Se o `message()` de recorte mostrar um raster vazio, o motivo mais comum
+  é os arquivos `.tif` não cobrirem toda a extensão do município.
+
+# 05 · OpenStreetMap — Vulnerabilidade Física {#sec-osm}
+
+**O que é:** dados colaborativos de mapeamento (o "Wikipedia dos mapas") —
+usamos as camadas de ferrovias, rodovias, linhas de energia, cursos d'água,
+corpos d'água e aeroportos.
+
+**Por que está no modelo:** corresponde às linhas "Railway/Highway/Power/
+Waterway intersection" da Tabela 1 (tipo *Physical characteristics*, fonte
+*OSM*, "100 m Buffer Intersect"). A proximidade a esses elementos indica
+risco físico — moradias próximas a linhas de trem ou beira de córrego, por
+exemplo, tendem a ser mais precárias e mais vulneráveis a acidentes.
+
+**De onde vem:** OpenStreetMap, consultado via API (`{osmdata}`).
+
+**Como é processado:**
+
+1. Consulta cada categoria de elemento dentro da área de estudo.
+2. Cria um **buffer (zona de amortecimento) de 100 m** ao redor de cada
+   elemento — a mesma distância usada no artigo.
+3. Para cada hexágono, verifica se ele **toca** algum desses buffers,
+   gerando um indicador binário por categoria (`TRUE`/`FALSE`).
+
+**Script e saída:**
+
+| | |
+|---|---|
+| Script | `05_osm_vulnerabilidade_fisica.R` |
+| Saída | `data/processed/open_street_maps.rds` |
+| Depende de | `grid_dasimetrico.rds` (script 01) |
+
+**Reprodutibilidade:**
+
+- `distancia_buffer <- 100` — o buffer de 100 m é o valor do artigo; mudar
+  esse número altera o significado do indicador de proximidade.
+- Dados do OSM são **colaborativos e mudam com o tempo** — rodar o script em
+  datas diferentes pode trazer resultados ligeiramente diferentes (novas
+  vias mapeadas, correções). Para reprodutibilidade estrita, considere
+  salvar um "corte" (snapshot) da consulta junto com a data de execução.
+
+# 06 · Open Buildings — Morfologia Urbana {#sec-buildings}
+
+**O que é:** um catálogo de edificações do mundo inteiro, gerado pelo
+Google a partir de imagens de satélite de alta resolução (50 cm),
+usando deep learning para "desenhar" o contorno de cada construção
+automaticamente.
+
+**Por que está no modelo:** corresponde às linhas "Number of buildings",
+"Average building area" e "The standard deviation of the building area" da
+Tabela 1 (tipo *Physical*). O artigo mostra (Fig. 2) que áreas de favela
+têm mais edificações por hexágono, porém **menores em média e mais
+variáveis em tamanho** — um padrão consistente com ocupação densa e
+informal.
+
+**De onde vem:** Open Buildings Dataset (Google Research / Sirko et al.,
+2021, 2024).
+
+**Como é processado:**
+
+1. Importa o CSV bruto (que cobre uma área muito maior que o município) e
+   faz um **pré-filtro por bounding box** — descarta a maior parte dos
+   registros de forma barata antes de qualquer operação geométrica pesada.
+2. Recorta exatamente para a área de estudo (`st_filter`).
+3. Vincula cada edificação ao hexágono que a contém (join espacial).
+4. Agrega por hexágono: número de edificações, área média e
+   **desvio-padrão da área** — esta última é a métrica pedida explicitamente
+   na Tabela 1 do artigo.
+
+**Script e saída:**
+
+| | |
+|---|---|
+| Script | `06_open_buildings_morfologia.R` |
+| Saída | `data/processed/open_buildings.rds` |
+| Depende de | `grid_dasimetrico.rds` (script 01) |
+| Reaproveitado por | `09_ibge_social_dasimetrico_edificacoes.R` (como camada auxiliar) |
+
+**Reprodutibilidade:**
+
+- O artigo (Seção 5.2, "Biases in open datasets") documenta explicitamente
+  que o Open Buildings tem viés conhecido: construções de material natural
+  (madeira, palha) ou em áreas de baixa refletividade podem não ser
+  detectadas — isso é uma limitação da fonte, não do script, e deve ser
+  citada em qualquer análise de erro do modelo.
+- Hexágonos sem nenhuma edificação recebem `number_of_buildings = 0` e
+  `NA` nas médias — decisão intencional (não são inventados valores).
+
+# 07 · Censo 2022 — Indicadores de Infraestrutura {#sec-censo}
+
+**O que é:** os microdados do Censo Demográfico 2022, na parte que pergunta
+sobre a infraestrutura do domicílio: tem água encanada? Esgoto? Coleta de
+lixo? E também questões de **entorno**: a rua tem calçada? Tem árvores?
+
+**Por que está no modelo:** corresponde às cinco primeiras linhas da Tabela
+1 (tipo *Social* e *Urban characteristics*): água, esgoto, resíduos,
+calçada e árvores — todas com fonte *IBGE Population Census 2022*, processo
+*Density area*. O artigo destaca (Introdução) que a inclusão de calçada e
+árvores por domicílio é uma **contribuição pioneira** do estudo — variáveis
+pouco exploradas em mapeamento de favelas, mas que se mostram altamente
+discriminativas (Fig. 3 e Fig. 9, SHAP).
+
+**De onde vem:** IBGE, via pacote `{censobr}` — microdados de domicílios e
+de entorno, por setor censitário.
+
+**Como é processado:**
+
+1. Lê os microdados de domicílios e entorno (formato `.rds`, já convertido
+   do parquet original).
+2. Para cada tema (água, esgoto, resíduos, calçada, árvores), soma por
+   setor censitário duas contagens: **"_rede"** (domicílios com a forma de
+   acesso mais adequada) e **"_total"** (todas as respostas ao quesito). A
+   razão entre as duas é o que vira percentual de cobertura no script
+   seguinte.
+3. Vincula essas contagens à malha espacial dos setores censitários,
+   corrigindo geometrias inválidas.
+
+Este script **para no nível de setor censitário** — a transferência para o
+grid hexagonal (que envolve escolher um método de interpolação espacial) é
+feita nos scripts 08–10, porque essa escolha tem implicações metodológicas
+importantes o suficiente para merecer scripts próprios.
+
+**Script e saída:**
+
+| | |
+|---|---|
+| Script | `07_censo_2022_infraestrutura.R` |
+| Saída | `data/processed/ibge_censo.rds` |
+| Usado por | `08_ibge_social_area_pura.R`, `09_ibge_social_dasimetrico_edificacoes.R`, `10_ibge_social_picnofilatico_tobler.R` |
+
+**Reprodutibilidade:**
+
+- Setores sem nenhum domicílio respondente em um quesito ficam com `0` (via
+  `coalesce`), não `NA` — importante para não confundir "sem dado" com
+  "sem acesso" ao interpretar os percentuais depois.
+
+# 08–10 · Transferência do Setor Censitário para o Hexágono {#sec-dasimetria}
+
+Esta é a parte metodologicamente mais delicada do pipeline: os dados do
+Censo vêm por **setor censitário** (polígonos irregulares, definidos pelo
+IBGE), mas o modelo precisa deles por **hexágono H3**. Como transferir um
+valor de um polígono para outro, sem simplesmente "borrar" a informação?
+
+O projeto implementa **três métodos alternativos**, cada um com um
+trade-off diferente entre simplicidade e realismo:
+
+```{r}
+#| echo: false
+#| eval: true
+knitr::kable(
+  data.frame(
+    Método = c("1. Área Pura", "2. Dasimetria por Edificações", "3. Picnofilático (Tobler)"),
+    Script = c("08_ibge_social_area_pura.R", "09_ibge_social_dasimetrico_edificacoes.R", "10_ibge_social_picnofilatico_tobler.R"),
+    Suposição = c(
+      "Densidade uniforme dentro do setor",
+      "Peso proporcional à área construída real (Open Buildings)",
+      "Superfície suave, sem descontinuidades nas bordas do setor"
+    ),
+    Limitação = c(
+      "'Borra' setores mistos (parte formal, parte favela) igualmente",
+      "Depende da cobertura do Open Buildings (viés conhecido, Seção 5.2)",
+      "Pode espalhar 'massa' sobre parques/rodovias sem dado real de ocupação"
+    )
+  )
+)
+```
+
+## 08 · Opção 1 — Interpolação por Área Pura (baseline)
+
+**Ideia didática:** imagine que um setor censitário tem 100 domicílios com
+água encanada, e um hexágono ocupa 30% da área desse setor. O método por
+área pura assume que esses 30% do setor têm, proporcionalmente, 30 dos 100
+domicílios com água — **não importa onde dentro do setor esses domicílios
+realmente estão**. É a suposição mais simples, e serve de referência
+("baseline") para comparar com os métodos mais sofisticados.
+
+**Limitação conhecida (documentada no próprio script):** setores mistos —
+parte formal, parte favela — têm os indicadores "borrados" igualmente entre
+as duas porções, exatamente a suposição de homogeneidade que o artigo quer
+superar ao falar em heterogeneidade intra-assentamento.
+
+## 09 · Opção 2 — Dasimetria Ponderada por Edificações
+
+**Ideia didática:** em vez de supor que a população se espalha
+uniformemente pelo setor, este método usa o Open Buildings (@sec-buildings)
+como **pista de onde as pessoas realmente estão**. Um hexágono sem nenhuma
+edificação (um parque, um córrego) recebe peso zero — mesmo que ocupe
+metade da área do setor, ele não "rouba" indicadores sociais que na
+verdade pertencem à parte habitada do setor.
+
+**Por que Open Buildings e não OpenStreetMap:** o script documenta
+explicitamente essa escolha — a cobertura de edifícios no OSM é
+sistematicamente mais esparsa em áreas pobres (viés de dados voluntários:
+mapeia-se mais onde há acesso e interesse). Usar OSM como peso faria
+exatamente o oposto do pretendido: subestimar a ocupação real de favelas.
+
+**Fallback:** se um setor não tiver nenhuma edificação mapeada, o script
+usa a Opção 1 (área pura) só para aquele setor, para não zerar
+silenciosamente hexágonos que só tocam esse setor.
+
+## 10 · Opção 3 — Interpolação Picnofilática de Tobler
+
+**Ideia didática:** transforma os polígonos de setor em uma **superfície
+contínua e suave**, como esticar uma toalha sobre os degraus de uma
+escada — elimina os "degraus" (descontinuidades) nas bordas dos setores,
+mas com uma restrição: a quantidade total de "toalha" sobre cada setor
+precisa continuar batendo com o valor original do Censo (preservação de
+volume/massa).
+
+**Diferença chave em relação à Opção 2:** não usa nenhuma informação real
+sobre onde as edificações estão — pode espalhar "massa populacional" sobre
+parques ou rodovias, entre dois pontos de maior densidade.
+
+## Checagem comum aos três métodos: preservação de massa
+
+Todos os três scripts fazem a mesma verificação ao final: a soma dos
+valores interpolados por hexágono deve bater com a soma original por setor
+(a menos de pequenas diferenças, por hexágonos fora de qualquer setor —
+área rural, por exemplo). Erros acima de 2% disparam um aviso — é o sinal
+de alarme mais confiável para detectar um bug de junção espacial silencioso.
+
+**Reprodutibilidade comum aos três:**
+
+- Todos leem os mesmos dois arquivos de entrada:
+  `data/processed/grid_dasimetrico.rds` e `data/processed/ibge_censo.rds`.
+- Todos usam a mesma lista de `colunas_contagem` (as 10 colunas `_rede`/
+  `_total` geradas no script 07) — se uma coluna for renomeada no script 07,
+  os três precisam ser atualizados juntos.
+
+# 11 · Comparação dos Métodos Dasimétricos
+
+**O que é:** um script de diagnóstico que roda (ou carrega, se já rodado)
+os três métodos acima sobre a mesma base, e compara **empiricamente** —
+não só teoricamente — qual deles separa melhor hexágonos `Slum` de
+`Non_Slum`.
+
+**Por que importa:** o artigo usa a área pura (Opção 1, alinhada à
+definição oficial de cobertura por área do IBGE) como método de
+referência. Este script existe para que a equipe possa **testar
+alternativas com rigor** antes de trocar o método usado no artigo — a
+troca de método dasimétrico é uma decisão metodológica, não deve ser feita
+"no olho".
+
+**Como funciona:**
+
+1. Junta os três datasets, com colunas sufixadas por método (`_area`,
+   `_edif`, `_pycno`).
+2. Calcula a **correlação de Spearman** entre métodos por variável —
+   correlações baixas indicam onde a escolha do método realmente muda o
+   retrato.
+3. Repete, para cada método, o teste t entre hexágonos `Slum` e
+   `Non_Slum` (mesma lógica da Fig. 2 do artigo) — o método com maior
+   `|estatística t|` é o que produz o maior contraste estatístico entre as
+   classes, ou seja, o que fornece o sinal mais forte para o modelo
+   aprender.
+
+**Script e saída:**
+
+| | |
+|---|---|
+| Script | `11_comparar_metodos_dasimetricos.R` |
+| Saída | `data/processed/ibge_social_comparativo_metodos.rds` |
+| Depende de | saídas dos scripts 08, 09, 10, e do rótulo do script 03 |
+
+**Nota importante:** este diagnóstico é um **proxy rápido**. O teste
+definitivo, citado no próprio script, é rodar o pipeline de modelagem
+completo três vezes — uma por método — e comparar Brier score, recall e
+Índice de Moran nos resíduos no holdout espacial. Este script produz só o
+material de decisão, não substitui essa validação final.
+
+# Tabela-resumo: Base de dados × Script × Saída × Tabela 1 do artigo
+
+```{r}
+#| echo: false
+#| eval: true
+knitr::kable(
+  data.frame(
+    `Base de dados` = c(
+      "Setores censitários (geobr)",
+      "CNEFE",
+      "Favelas e Comunidades (IBGE)",
+      "Topodata (INPE)",
+      "OpenStreetMap",
+      "Open Buildings (Google)",
+      "Censo 2022 - domicílios/entorno",
+      "Interpolação dasimétrica (x3)"
+    ),
+    Script = c(
+      "01_extracao_dados.R",
+      "02_preparacao_cnefe.R",
+      "03_variavel_alvo_is_slum.R",
+      "04_topodata_agregacao_h3.R",
+      "05_osm_vulnerabilidade_fisica.R",
+      "06_open_buildings_morfologia.R",
+      "07_censo_2022_infraestrutura.R",
+      "08 / 09 / 10 / 11"
+    ),
+    `Saída (.rds)` = c(
+      "grid_dasimetrico.rds",
+      "ibge_cnefe.rds",
+      "favelas_e_comunidades_urbanas_area_pura.rds",
+      "topodata_declividade.rds",
+      "open_street_maps.rds",
+      "open_buildings.rds",
+      "ibge_censo.rds",
+      "ibge_social_*.rds"
+    ),
+    `Dimensão (Tabela 1)` = c(
+      "Unidade de análise",
+      "Filtro dasimétrico (apoio)",
+      "Variável alvo (Y)",
+      "Environmental",
+      "Physical characteristics",
+      "Physical",
+      "Social / Urban characteristics",
+      "Social / Urban characteristics"
+    ),
+    check.names = FALSE
+  )
+)
+```
+
+# Checklist de reprodutibilidade end-to-end
+
+Para reproduzir o dataset final do zero, a ordem de execução importa:
+
+1. `02_preparacao_cnefe.R` — não depende de nada além dos dados brutos.
+2. `01_extracao_dados.R` — depende da saída do script 02.
+3. `07_censo_2022_infraestrutura.R` — não depende do grid, só dos dados
+   brutos do Censo.
+4. `03_variavel_alvo_is_slum.R`, `04_topodata_agregacao_h3.R`,
+   `05_osm_vulnerabilidade_fisica.R`, `06_open_buildings_morfologia.R` —
+   todos dependem apenas do `grid_dasimetrico.rds` (script 01), podem
+   rodar em qualquer ordem entre si.
+5. `08_ibge_social_area_pura.R`, `09_ibge_social_dasimetrico_edificacoes.R`,
+   `10_ibge_social_picnofilatico_tobler.R` — dependem do grid (01) e do
+   Censo (07); o script 09 também depende do Open Buildings bruto (mesmo
+   arquivo usado no script 06, mas lido em formato de pontos, não agregado).
+6. `11_comparar_metodos_dasimetricos.R` — depende das saídas de 08, 09, 10
+   e do rótulo do script 03. Se as saídas de 08–10 não existirem, ele as
+   gera automaticamente via `source()`.
+
+**Parâmetros que precisam ser iguais em todos os scripts** (documentados
+individualmente em cada um, reunidos aqui para checagem rápida):
+
+- `codigo_municipio <- "3550308"` (São Paulo)
+- Resolução do H3: **10**
+- CRS métrico para cálculos de área/buffer: **EPSG:31983** (SIRGAS 2000 /
+  UTM 23S)
+- Limiar de classificação `is_slum`: **70%**
+- Buffer de vulnerabilidade física (OSM): **100 m**

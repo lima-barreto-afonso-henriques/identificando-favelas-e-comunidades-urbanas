@@ -1,0 +1,205 @@
+---
+title: "Guia de Arquitetura e Boas Práticas para Projetos em R"
+subtitle: "Referencial Tidyverse, Estrutura Modular, Versionamento Git e Reprodutibilidade"
+author: "Referência Técnica de Data Science"
+date: "2026-08-24"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-title: "Conteúdo"
+    theme: cosmo
+    number-sections: true
+    embed-resources: true
+---
+
+## Introdução
+
+Este documento serve como guia de referência técnica para a estruturação, organização e desenvolvimento de projetos de Data Science em R, utilizando o ecossistema **tidyverse**, boas práticas de versionamento com **Git/GitHub** e controle de dependências com **renv**.
+
+---
+
+## Estrutura Global do Projeto
+
+A organização segue uma abordagem modular para projetos complexos, onde dados, código, documentação e saídas são estritamente segregados.
+
+```text
+meu_projeto/
+├── .gitignore              # Arquivos e pastas ignorados pelo Git
+├── .Rprofile               # Configurações de inicialização do R
+├── meu_projeto.Rproj       # Arquivo do projeto RStudio (Diretório Raiz)
+├── README.md               # Documentação principal do repositório
+├── renv.lock               # Mapeamento de dependências e versões de pacotes
+├── data/
+│   ├── raw/                # Dados brutos (Somente leitura - NÃO versionados)
+│   ├── processed/          # Dados limpos e intermediários (.rds ou .parquet)
+│   └── final/              # Datasets consolidados para modelagem/outputs
+├── docs/                   # Documentação, dicionários de dados e relatórios
+├── outputs/
+│   ├── figures/            # Gráficos gerados (.png, .pdf, .svg)
+│   └── tables/             # Tabelas exportadas (.csv, .xlsx, .html)
+└── scripts/
+    ├── 00_functions/       # Funções auxiliares, utilitários e temas
+    ├── 01_data_prep/       # Scripts de ETL (Extração, Limpeza e Tratamento)
+    ├── 02_analysis/        # Análise exploratória, estatística e modelagem
+    └── 03_outputs/         # Exportação de gráficos, tabelas e relatórios
+```
+
+---
+
+## Estrutura da Pasta `scripts/`
+
+A pasta `scripts/` deve ser organizada em subpastas temáticas numeradas para indicar a sequência lógica de execução do projeto.
+
+### Detalhamento dos Módulos
+
+1. **`00_functions/`**:
+   - `01_utils.R`: Funções utilitárias reutilizáveis (ex: formatação, conversão de unidades).
+   - `02_theme.R`: Padronização visual e temas do `ggplot2`.
+2. **`01_data_prep/`**:
+   - `01_fetch_raw.R`: Conexão com banco de dados, requisição em APIs ou leitura bruta.
+   - `02_clean_data.R`: Tratamento de `NA`s, padronização de colunas e junções (`dplyr`, `tidyr`, `stringr`, `lubridate`).
+3. **`02_analysis/`**:
+   - `01_eda.R`: Análise exploratória de dados e validação de hipóteses.
+   - `02_model.R`: Treinamento, validação e avaliação de modelos (`tidymodels`).
+4. **`03_outputs/`**:
+   - `01_render_plots.R`: Geração e salvamento de visualizações em alta resolução com `ggsave()`.
+   - `02_export_tables.R`: Geração de tabelas consolidadas (`gt`, `flextable`).
+
+### Regras Principais
+- **Separação de Responsabilidades:** Nunca misture código de limpeza de dados com código de visualização ou modelagem.
+- **Persistência de Dados Intermediários:** Após a etapa de limpeza (`02_clean_data.R`), salve o dataframe processado na pasta `data/processed/` nos formatos `.rds` ou `.parquet`. Os scripts das fases seguintes devem carregar diretamente esses arquivos.
+
+---
+
+## Versionamento com Git e GitHub
+
+### Arquivo `.gitignore` Recomendado
+
+Crie o arquivo `.gitignore` na raiz do projeto com as seguintes diretrizes:
+
+```gitignore
+# --- Dados e Arquivos Grandes ---
+data/raw/*
+data/processed/*
+data/final/*
+outputs/figures/*
+outputs/tables/*
+!.gitkeep
+
+# --- Histórico e Configurações do R/RStudio ---
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+
+# --- Credenciais e Variáveis de Ambiente ---
+.env
+.Renviron
+*.pem
+*.key
+
+# --- Caches do renv (Apenas o renv.lock vai para o Git) ---
+renv/library/
+renv/python/
+renv/staging/
+```
+
+### Preservando Pastas Vazias com `.gitkeep`
+Como o Git ignora pastas vazias, crie um arquivo texto vazio chamado `.gitkeep` dentro de pastas que não contêm arquivos versionados (ex: `data/raw/`, `outputs/figures/`). Isso garante que a estrutura do projeto seja preservada ao clonar o repositório.
+
+---
+
+## Gerenciamento de Dependências com `renv`
+
+O pacote `renv` garante o isolamento das bibliotecas e a reprodutibilidade do projeto.
+
+### Fluxo de Trabalho do `renv`
+
+::: {.callout-note}
+#### Inicialização do Projeto
+Para iniciar o isolamento de dependências no projeto, execute no console:
+```r
+install.packages("renv")
+renv::init()
+```
+:::
+
+### Comandos Essenciais
+
+| Comando | Descrição |
+|---|---|
+| `renv::status()` | Verifica se há divergências entre os pacotes instalados e o `renv.lock`. |
+| `renv::snapshot()` | Grava o estado e as versões atuais das bibliotecas no arquivo `renv.lock`. |
+| `renv::restore()` | Instala as versões exatas dos pacotes listadas no `renv.lock` ao clonar o projeto. |
+
+### Solução para Ativação Inicial e Instalações Pós-Init
+Se você instalou pacotes logo após o `renv::init()` sem ter reiniciado o R, ao rodar `renv::snapshot()` escolha a opção **`1`** (para ativar o projeto), reinicie a sessão R (`Ctrl + Shift + F10`), execute novamente `install.packages("pacote")` e então chame `renv::snapshot()`.
+
+---
+
+## Caminhos Portáveis com o Pacote `here`
+
+### Por que NUNCA usar `setwd()`?
+O comando `setwd("C:/caminho/absoluto")` quebra a portabilidade do projeto ao ser executado em outra máquina ou sistema operacional.
+
+### Como utilizar o `here::here()`
+
+O pacote `here` identifica automaticamente a raiz do projeto (onde está o arquivo `.Rproj`).
+
+```r
+library(tidyverse)
+library(here)
+
+# Leitura de dados brutos
+dados_brutos <- read_csv(here("data", "raw", "vendas.csv"))
+
+# Salvando dados processados
+write_rds(dados_processados, here("data", "processed", "vendas_limpas.rds"))
+
+# Salvando gráficos
+ggsave(
+  filename = here("outputs", "figures", "grafico_vendas.png"),
+  plot = meu_grafico,
+  width = 8, height = 6
+)
+```
+
+---
+
+## Boas Práticas Adicionais para Projetos em R
+
+### Gestão de Segredos e Credenciais (`.Renviron`)
+- Nunca escreva senhas, chaves de API ou tokens de banco de dados diretamente nos scripts R.
+- Utilize o arquivo `.Renviron` na raiz do projeto (garanta que esteja no `.gitignore`):
+  ```env
+  API_KEY="sua_chave_secreta_aqui"
+  DB_PASSWORD="sua_senha_aqui"
+  ```
+- Acesse as variáveis no R via `Sys.getenv("API_KEY")`.
+
+### Estilo de Código e Legibilidade
+- Siga o [tidyverse style guide](https://style.tidyverse.org/).
+- Utilize nomes de variáveis em `snake_case` (ex: `data_inicio`, `valor_total`).
+- Utilize o atalho `Ctrl + Shift + A` para auto-formatar trechos de código no RStudio.
+- Reinicie a sessão R frequentemente (`Ctrl + Shift + F10`) para validar se os scripts rodam de forma independente e limpa.
+
+### Documentação
+- Mantenha o `README.md` atualizado informando:
+  1. Propósito do projeto.
+  2. Como clonar e configurar o ambiente (`renv::restore()`).
+  3. Ordem de execução dos scripts.
+- Documente os datasets na pasta `docs/` criando dicionários de dados informando o significado e o tipo de cada variável.
+
+---
+
+## Checklist para Início de Novo Projeto
+
+- [ ] Criar novo projeto no RStudio (`.Rproj`).
+- [ ] Inicializar repositório Git (`git init`).
+- [ ] Criar estrutura de subpastas (`data/`, `docs/`, `outputs/`, `scripts/`).
+- [ ] Criar arquivos `.gitkeep` em pastas vazias.
+- [ ] Criar arquivo `.gitignore` configurado.
+- [ ] Inicializar o `renv` (`renv::init()`).
+- [ ] Criar arquivo `README.md` inicial.
+- [ ] Realizar o commit inicial (`git add .` e `git commit -m "initial commit"`).
