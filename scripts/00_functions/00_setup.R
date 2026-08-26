@@ -8,6 +8,7 @@ if (!require(pacman)) {
 pacman::p_load(
   here,
   tidyverse,
+  tidymodels,
   geobr,
   censobr,
   sf,
@@ -23,5 +24,9 @@ pacman::p_load(
   yaml,
   ggcorrplot,
   patchwork,
-  spatialsample
+  spatialsample,
+  future,
+  themis,
+  blockCV,
+  parallelly
 )
