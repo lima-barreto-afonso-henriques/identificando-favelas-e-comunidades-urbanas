@@ -28,7 +28,42 @@ crs_destino <- "EPSG:4674"
 # 2. IMPORTAR O GRID HEXAGONAL PRÉ-PROCESSADO
 # ==============================================================================
 
-grid_h3_sf <- readRDS(file.path(pasta_saida, "grid_dasimetrico.rds"))
+# <- mude aqui (9, 10 ou 11) e rode de novo a cada vez
+resolucao_hex <- 11
+
+arquivos_entrada <- c(
+  "9" = "grid_dasimetrico_res9.rds",
+  "10" = "grid_dasimetrico_res10.rds",
+  "11" = "grid_dasimetrico_res11.rds"
+)
+
+# Puxa o nome do arquivo com base na seleção
+arquivo_entrada <- arquivos_entrada[[as.character(resolucao_hex)]]
+sufixo_saida <- paste0("_res", resolucao_hex)
+
+# Substitua 'pasta_saida' pela variável correta onde os
+# grids ficam salvos no seu projeto
+caminho_do_grid <- file.path(
+  pasta_saida,
+  arquivo_entrada
+)
+
+if (!file.exists(caminho_do_grid)) {
+  stop(
+    "Arquivo '",
+    arquivo_entrada,
+    "' não encontrado em ",
+    caminho_do_grid,
+    ". ",
+    "Certifique-se de gerar o grid hexagonal para a resolução ",
+    resolucao_hex,
+    " antes de prosseguir."
+  )
+}
+
+# carrega o grid hexagonal dasimétrico (já filtrado para áreas habitadas)
+grid_h3_sf <-
+  readRDS(caminho_do_grid)
 glimpse(grid_h3_sf)
 
 
@@ -135,7 +170,6 @@ grid_h3_resultados <-
 # ==============================================================================
 
 glimpse(grid_h3_resultados)
-summary(grid_h3_resultados)
 
 # checagem visual rápida da agregação por hexágono
 plot(
@@ -157,7 +191,10 @@ topodata_final <-
 
 saveRDS(
   topodata_final,
-  file.path(pasta_saida, "topodata_declividade.rds")
+  file.path(
+    pasta_saida,
+    paste0("topodata_declividade", sufixo_saida, ".rds")
+  )
 )
 
 # FIM ==========================================================================

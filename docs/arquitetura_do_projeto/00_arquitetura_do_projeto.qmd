@@ -1,0 +1,265 @@
+---
+title: "Guia de Arquitetura e Boas Práticas para Projetos em R"
+subtitle: "Padrão de estrutura, versionamento e reprodutibilidade — reutilizável entre projetos"
+author: "Lima Barreto"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    toc-title: "Conteúdo"
+    theme: cosmo
+    number-sections: true
+    embed-resources: true
+---
+
+## Introdução
+
+Este documento é o **padrão técnico** que qualquer projeto em R desta
+equipe deve seguir: organização de pastas, versionamento com Git/GitHub,
+controle de dependências com `renv`, e convenções de código.
+
+Ele é o companheiro técnico do `README.md` do projeto — a divisão de
+papéis é simples:
+
+- **`README.md`** — visão geral: o que o projeto faz, por que existe,
+  como reproduzir os resultados principais. É o que alguém lê primeiro.
+- **Este guia** — como o projeto é organizado por dentro, para quem vai
+  escrever ou revisar código.
+- **`docs/00_documentacao_bases_dados.qmd`** (se o projeto tiver dados
+  externos) — o dicionário de dados: o que cada base representa e como é
+  processada (ver `template_documentacao_bases_dados.qmd`).
+
+---
+
+## Estrutura Global do Projeto
+
+```text
+meu_projeto/
+├── .gitignore              # Arquivos e pastas ignorados pelo Git
+├── .Rprofile               # Configurações de inicialização do R
+├── meu_projeto.Rproj       # Arquivo do projeto RStudio (diretório raiz)
+├── README.md               # Documentação principal do repositório
+├── renv.lock               # Mapeamento de dependências e versões de pacotes
+├── data/
+│   ├── raw/                # Dados brutos (somente leitura — NÃO versionados)
+│   ├── processed/          # Dados limpos e intermediários (.rds ou .parquet)
+│   └── outputs/            # Artefatos finais: modelos, tabelas, figuras (.rds, .png, .csv)
+├── docs/                   # Documentação didática: dicionário de dados, relatórios
+└── scripts/
+    ├── 00_functions/        # Funções, temas e pacotes compartilhados por todo o projeto
+    ├── 01_data_prep/        # ETL: extração, limpeza, junção de bases
+    ├── 02_eda/              # Análise exploratória e validação de hipóteses
+    ├── 03_analysis/         # Modelagem, sensibilidade, validação
+    └── 04_outputs/          # Exportação de gráficos, tabelas e relatórios finais
+```
+
+> As subpastas de `scripts/` numeradas em `02`-`04` são um ponto de
+> partida — um projeto pequeno pode precisar só de `01_data_prep/` e
+> `02_analysis/`; um maior pode separar `02_eda/`, `03_analysis/` e
+> `04_modeling/`. O que **não muda** entre projetos é `00_functions/` e a
+> regra de execução em ordem numérica abaixo.
+
+---
+
+## Estrutura da Pasta `scripts/`
+
+### `00_functions/` — sempre a primeira pasta, sempre com esse nome
+
+| Arquivo | Conteúdo |
+|---|---|
+| `00_setup.R` | Carrega pacotes (via `pacman::p_load()`) e define opções globais compartilhadas por **todos** os scripts do projeto. |
+| `01_utils.R` | Funções utilitárias de uso geral (estatística, formatação, I/O) — não relacionadas a tema visual. |
+| `02_themes.R` | Paleta de cores e temas `ggplot2` do projeto (mantém os gráficos visualmente consistentes sem repetir `theme()` em cada script). |
+
+**Regra de ouro:** todo script do projeto começa com
+
+```r
+source(here::here("scripts", "00_functions", "00_setup.R"))
+```
+
+Isso garante que qualquer script rode de forma independente (basta abrir e
+rodar), sem depender de estado deixado por outro script na mesma sessão.
+
+### Demais pastas (ETL, análise, saídas)
+
+- **`01_data_prep/`**: conexão com fontes de dados, requisições a APIs,
+  limpeza, padronização de colunas e junções (`dplyr`, `tidyr`,
+  `stringr`, `lubridate`).
+- **`02_eda/` / `03_analysis/`**: exploração de dados, validação de
+  hipóteses, modelagem e validação (`tidymodels`).
+- **`04_outputs/`**: geração de visualizações finais em alta resolução
+  (`ggsave()`) e tabelas consolidadas (`gt`, `flextable`).
+
+### Regras Principais
+
+- **Separação de responsabilidades:** nunca misture limpeza de dados com
+  visualização ou modelagem no mesmo script.
+- **Persistência de dados intermediários:** após cada etapa de
+  pré-processamento, salve o resultado em `data/processed/` (`.rds` ou
+  `.parquet`). Os scripts seguintes devem **carregar esse arquivo**, não
+  reprocessar os dados brutos de novo.
+- **Nomeação numérica sequencial:** o número no início do nome do arquivo
+  (`01_`, `02_`...) indica a ordem de execução — não a ordem alfabética
+  do assunto.
+
+---
+
+## Versionamento com Git e GitHub
+
+### Arquivo `.gitignore` Recomendado
+
+```gitignore
+# --- Dados e Arquivos Grandes ---
+data/raw/*
+data/processed/*
+data/outputs/*
+!.gitkeep
+
+# --- Histórico e Configurações do R/RStudio ---
+.Rhistory
+.RData
+.Ruserdata
+.Rproj.user/
+
+# --- Credenciais e Variáveis de Ambiente ---
+.env
+.Renviron
+*.pem
+*.key
+
+# --- Caches do renv (apenas o renv.lock vai para o Git) ---
+renv/library/
+renv/python/
+renv/staging/
+```
+
+### Preservando Pastas Vazias com `.gitkeep`
+
+Como o Git ignora pastas vazias, crie um arquivo texto vazio chamado
+`.gitkeep` dentro de pastas que não têm arquivos versionados (ex.:
+`data/raw/`, `data/outputs/`). Isso garante que a estrutura do projeto
+seja preservada ao clonar o repositório.
+
+---
+
+## Gerenciamento de Dependências com `renv`
+
+O pacote `renv` garante o isolamento das bibliotecas e a reprodutibilidade
+do projeto.
+
+::: {.callout-note}
+#### Inicialização do Projeto
+```r
+install.packages("renv")
+renv::init()
+```
+:::
+
+### Comandos Essenciais
+
+| Comando | Descrição |
+|---|---|
+| `renv::status()` | Verifica divergências entre os pacotes instalados e o `renv.lock`. |
+| `renv::snapshot()` | Grava o estado e as versões atuais das bibliotecas no `renv.lock`. |
+| `renv::restore()` | Instala as versões exatas dos pacotes listadas no `renv.lock` ao clonar o projeto. |
+
+### Solução para Ativação Inicial e Instalações Pós-Init
+
+Se você instalou pacotes logo após o `renv::init()` sem ter reiniciado o
+R, ao rodar `renv::snapshot()` escolha a opção **`1`** (para ativar o
+projeto), reinicie a sessão R (`Ctrl+Shift+F10`), rode de novo
+`install.packages("pacote")` e então chame `renv::snapshot()`.
+
+---
+
+## Caminhos Portáveis com o Pacote `here`
+
+### Por que nunca usar `setwd()`
+
+`setwd("C:/caminho/absoluto")` quebra a portabilidade do projeto ao ser
+executado em outra máquina ou sistema operacional.
+
+### Como usar `here::here()`
+
+```r
+library(tidyverse)
+library(here)
+
+# Leitura de dados brutos
+dados_brutos <- read_csv(here("data", "raw", "vendas.csv"))
+
+# Salvando dados processados
+write_rds(dados_processados, here("data", "processed", "vendas_limpas.rds"))
+
+# Salvando gráficos
+ggsave(
+  filename = here("data", "outputs", "figures", "grafico_vendas.png"),
+  plot = meu_grafico,
+  width = 8, height = 6
+)
+```
+
+---
+
+## Boas Práticas Adicionais
+
+### Gestão de Segredos e Credenciais (`.Renviron`)
+
+- Nunca escreva senhas, chaves de API ou tokens diretamente nos scripts.
+- Use o arquivo `.Renviron` na raiz do projeto (garanta que esteja no
+  `.gitignore`):
+  ```env
+  API_KEY="sua_chave_secreta_aqui"
+  DB_PASSWORD="sua_senha_aqui"
+  ```
+- Acesse as variáveis no R via `Sys.getenv("API_KEY")`.
+
+### Paralelização com `future` — cuidado com ambientes corporativos
+
+Se algum script usar `future::plan(multisession, ...)`, prefira sempre um
+fallback seguro — VPNs, firewalls e antivírus corporativos costumam
+bloquear a rajada de conexões locais que o `multisession` abre:
+
+```r
+options(parallelly.makeNodePSOCK.setup_strategy = "sequential")
+tryCatch(
+  future::plan(multisession, workers = max(1, parallelly::availableCores() - 1)),
+  error = function(e) {
+    message("Paralelismo indisponível (", conditionMessage(e), "); rodando sequencialmente.")
+    future::plan(sequential)
+  }
+)
+```
+
+### Estilo de Código e Legibilidade
+
+- Siga o [tidyverse style guide](https://style.tidyverse.org/).
+- Use nomes de variáveis em `snake_case` (ex.: `data_inicio`, `valor_total`).
+- Use `Ctrl+Shift+A` para auto-formatar trechos de código no RStudio/Positron.
+- Reinicie a sessão R com frequência (`Ctrl+Shift+F10`) para validar que
+  os scripts rodam de forma independente e limpa.
+
+### Documentação
+
+- Mantenha o `README.md` atualizado (ver `TEMPLATE_README.md`) informando:
+  1. Propósito do projeto.
+  2. Como clonar e configurar o ambiente (`renv::restore()`).
+  3. Ordem de execução dos scripts.
+- Documente os datasets em `docs/` usando
+  `template_documentacao_bases_dados.qmd` como ponto de partida.
+
+---
+
+## Checklist para Início de Novo Projeto
+
+- [ ] Criar novo projeto no RStudio/Positron (`.Rproj`).
+- [ ] Inicializar repositório Git (`git init`).
+- [ ] Criar estrutura de pastas (`data/{raw,processed,outputs}`, `docs/`, `scripts/00_functions/`).
+- [ ] Criar `00_setup.R` dentro de `scripts/00_functions/`.
+- [ ] Criar arquivos `.gitkeep` em pastas vazias.
+- [ ] Criar `.gitignore` configurado.
+- [ ] Inicializar o `renv` (`renv::init()`).
+- [ ] Copiar `TEMPLATE_README.md` para `README.md` e preencher.
+- [ ] Se houver dados externos, copiar `template_documentacao_bases_dados.qmd` para `docs/`.
+- [ ] Fazer o commit inicial (`git add .` e `git commit -m "initial commit"`).

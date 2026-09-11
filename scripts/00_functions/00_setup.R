@@ -12,6 +12,7 @@ pacman::p_load(
   geobr,
   censobr,
   sf,
+  gt,
   h3jsr,
   skimr,
   vroom,
@@ -28,5 +29,19 @@ pacman::p_load(
   future,
   themis,
   blockCV,
-  parallelly
+  parallelly,
+  rpart, # Decision Tree
+  ranger, # Random Forest
+  xgboost, # XGBoost
+  C50, # boosting via C5.0 -> aproximação de AdaBoost
+  bonsai, # engine lightgbm para boost_tree() -> aproximação de Gradient Boosting
+  lightgbm,
+  kknn, # KNN
+  workflowsets,
+  cluster, # silhouette() para validar k do k-means
+  fastshap, # SHAP (Monte Carlo) para o modelo final
+  shapviz, # visualização de SHAP (beeswarm/bar) compatível com fastshap
+  duckdb,
+  DBI,
+  furrr
 )

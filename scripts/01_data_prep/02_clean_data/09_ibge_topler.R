@@ -401,6 +401,39 @@ interpolar_picnofilatico <- function(
   resultado
 }
 
+# caminho do grid hexagonal dasimétrico gerado no script de extração
+# <- mude aqui (9, 10 ou 11) e rode de novo a cada vez
+resolucao_hex <- 11
+
+arquivos_entrada <- c(
+  "9" = "grid_dasimetrico_res9.rds",
+  "10" = "grid_dasimetrico_res10.rds",
+  "11" = "grid_dasimetrico_res11.rds"
+)
+
+# Puxa o nome do arquivo com base na seleção
+arquivo_entrada <- arquivos_entrada[[as.character(resolucao_hex)]]
+sufixo_saida <- paste0("_res", resolucao_hex)
+
+# Substitua 'pasta_saida' pela variável correta onde os
+# grids ficam salvos no seu projeto
+caminho_do_grid <- file.path(
+  pasta_saida,
+  arquivo_entrada
+)
+
+if (!file.exists(caminho_do_grid)) {
+  stop(
+    "Arquivo '",
+    arquivo_entrada,
+    "' não encontrado em ",
+    caminho_do_grid,
+    ". ",
+    "Certifique-se de gerar o grid hexagonal para a resolução ",
+    resolucao_hex,
+    " antes de prosseguir."
+  )
+}
 
 # ==============================================================================
 # 3. EXECUÇÃO (SE RODADO DIRETAMENTE, NÃO VIA source())
@@ -415,7 +448,7 @@ if (sys.nframe() == 0) {
   # função interpolar_picnofilatico() acima para os limites de segurança)
   resolucao_pycno_metros <- 50
 
-  arquivo_grid <- file.path(pasta_saida, "grid_dasimetrico.rds")
+  arquivo_grid <- caminho_do_grid
   arquivo_setores <- file.path(pasta_saida, "ibge_censo.rds")
 
   # falha explícita se a base de setores não existir — sem fallback
@@ -505,9 +538,14 @@ if (sys.nframe() == 0) {
 
   glimpse(ibge_social_picnofilatico_tobler)
 
+  sufixo_saida <- paste0("_res", resolucao_hex)
+
   saveRDS(
     ibge_social_picnofilatico_tobler,
-    file.path(pasta_saida, "ibge_social_picnofilatico_tobler.rds")
+    file.path(
+      pasta_saida,
+      paste0("ibge_social_picnofilatico_tobler", sufixo_saida, ".rds")
+    )
   )
 
   message(

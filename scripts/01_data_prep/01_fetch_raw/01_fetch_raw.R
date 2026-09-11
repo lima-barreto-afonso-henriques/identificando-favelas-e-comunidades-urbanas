@@ -203,7 +203,6 @@ baixar_e_extrair_zip(
 # 5. OPEN BUILDINGS (GOOGLE)
 # ==============================================================================
 
-# baixa as edificações do Open Buildings da Google
 pasta_open_buildings <-
   garantir_pasta(here(pasta_entrada, "open_buildings"))
 
@@ -213,10 +212,6 @@ url_open_buildings <- paste0(
   "94d_buildings.csv.gz"
 )
 
-# mantemos o arquivo compactado — vroom() lê .csv.gz nativamente (detecta
-# a extensão e descompacta em memória, sob demanda), então descompactar em
-# disco antes só gastaria tempo e espaço em dobro sem nenhum benefício.
-# Os scripts 06 e 09 leem este mesmo arquivo '.csv.gz' diretamente.
 arquivo_gz <- here(pasta_open_buildings, "94d_buildings.csv.gz")
 
 if (!file.exists(arquivo_gz)) {
@@ -224,6 +219,75 @@ if (!file.exists(arquivo_gz)) {
   message("   -> Download do Open Buildings concluído.")
 } else {
   message("   -> Arquivo do Open Buildings já existe — pulando download.")
+}
+
+# ------------------------------------------------------------------------
+# CONVERSÃO PARA PARQUET PARTICIONADO (uma vez só, reaproveitado pelos
+# scripts 06, 08 e 09)
+# ------------------------------------------------------------------------
+# O .csv.gz é lido do zero (descompactar + parsear tudo) TODA VEZ que
+# qualquer script precisa dele, mesmo filtrando só uma pequena área —
+# gzip não é seekable, então não existe "pular direto" para o trecho
+# relevante dentro dele. Convertendo uma vez para Parquet particionado por
+# uma grade grosseira de lat/lon (Hive-style: pastas lat_bin=.../lon_bin=...),
+# leituras futuras com filtro geográfico podem PODAR partições inteiras
+# sem sequer abri-las — o ganho de tempo, não só de memória, se repete a
+# cada script/resolução que usa este arquivo daqui pra frente.
+pasta_parquet <- here(pasta_open_buildings, "94d_buildings_parquet")
+
+parquet_ja_existe <-
+  dir.exists(pasta_parquet) &&
+  length(list.files(pasta_parquet, pattern = "\\.parquet$", recursive = TRUE)) >
+    0
+
+if (!parquet_ja_existe) {
+  message(
+    "   -> Convertendo para Parquet particionado (lat_bin/lon_bin, uma vez só)..."
+  )
+
+  if (!requireNamespace("duckdb", quietly = TRUE)) {
+    stop(
+      "Pacote 'duckdb' não instalado. Rode install.packages(\"duckdb\") — ",
+      "necessário para converter o Open Buildings para Parquet particionado."
+    )
+  }
+
+  con <- duckdb::dbConnect(duckdb::duckdb())
+  on.exit(duckdb::dbDisconnect(con, shutdown = TRUE), add = TRUE)
+
+  # tamanho da célula da grade de partição, em graus (~11km no equador a
+  # 0.1°) — grosseiro o suficiente para poucas centenas/milhares de
+  # partições (não milhões de arquivinhos, que degradaria o próprio
+  # Parquet), fino o suficiente para podar a maior parte do arquivo fora
+  # da área de estudo em qualquer resolução H3 usada no projeto
+  tamanho_celula_particao <- 0.1
+
+  DBI::dbExecute(
+    con,
+    sprintf(
+      "COPY (
+       SELECT
+         longitude,
+         latitude,
+         area_in_meters,
+         confidence,
+         CAST(FLOOR(latitude / %f) * %f AS DOUBLE) AS lat_bin,
+         CAST(FLOOR(longitude / %f) * %f AS DOUBLE) AS lon_bin
+       FROM read_csv_auto('%s')
+       WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+     ) TO '%s' (FORMAT PARQUET, PARTITION_BY (lat_bin, lon_bin), OVERWRITE_OR_IGNORE true)",
+      tamanho_celula_particao,
+      tamanho_celula_particao,
+      tamanho_celula_particao,
+      tamanho_celula_particao,
+      arquivo_gz,
+      pasta_parquet
+    )
+  )
+
+  message("   -> Conversão para Parquet concluída em '", pasta_parquet, "'.")
+} else {
+  message("   -> Parquet particionado já existe — pulando conversão.")
 }
 
 

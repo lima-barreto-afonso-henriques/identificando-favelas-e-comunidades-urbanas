@@ -23,7 +23,6 @@ pasta_saida <- here("data", "processed")
 
 # subpastas específicas deste script
 pasta_censo_raw <- here(pasta_entrada, "censobr")
-pasta_municipio <- here(pasta_entrada, "municipio")
 pasta_malha_setores <- here(pasta_entrada, "geobr")
 
 # ==============================================================================
@@ -35,8 +34,8 @@ pasta_malha_setores <- here(pasta_entrada, "geobr")
 codigo_municipio_filtro <- "3550308"
 
 # caminhos dos arquivos de entrada, já convertidos para .rds
-arquivo_domicilios <- here(pasta_censo_raw, "domicilios_sp.rds")
-arquivo_entorno <- here(pasta_censo_raw, "entorno_sp.rds")
+arquivo_domicilios <- here(pasta_censo_raw, "domicilios_municipio.rds")
+arquivo_entorno <- here(pasta_censo_raw, "entorno_municipio.rds")
 arquivo_malha_setores <- here(
   pasta_malha_setores,
   "setores_censitarios_ibge.rds"

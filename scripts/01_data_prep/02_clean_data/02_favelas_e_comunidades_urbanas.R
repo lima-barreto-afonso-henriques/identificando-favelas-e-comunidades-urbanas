@@ -32,11 +32,16 @@
 
 # carrega funções e pacotes utilizados em todos os scripts do projeto
 source(here::here("scripts", "00_functions", "00_setup.R"))
+source(here::here("scripts", "00_functions", "01_utils.R"))
 
 # caminhos padronizados de entrada e saída
 pasta_entrada <- here("data", "raw")
 pasta_saida <- here("data", "processed")
 
+# código do município
+# (ou lista de códigos, para regiões metropolitanas)
+# ex.: 3550308 = São Paulo (SP)
+codigo_municipio_filtro <- "3550308"
 
 # ==============================================================================
 # 1. PARÂMETROS
@@ -46,9 +51,42 @@ pasta_saida <- here("data", "processed")
 # é considerado "Slum" — mesmo limiar usado no artigo (Seção 3.3)
 limiar_classificacao <- 0.70
 
-# caminho do grid hexagonal dasimétrico gerado no script de extração
-arquivo_grid_dasimetrico <-
-  here(pasta_saida, "grid_dasimetrico.rds")
+# <- mude aqui (9, 10 ou 11) e rode de novo a cada vez
+resolucao_hex <- 11
+
+arquivos_entrada <- c(
+  "9" = "grid_dasimetrico_res9.rds",
+  "10" = "grid_dasimetrico_res10.rds",
+  "11" = "grid_dasimetrico_res11.rds"
+)
+
+# Puxa o nome do arquivo com base na seleção
+arquivo_entrada <- arquivos_entrada[[as.character(resolucao_hex)]]
+sufixo_saida <- paste0("_res", resolucao_hex)
+
+# Substitua 'pasta_saida' pela variável correta onde os
+# grids ficam salvos no seu projeto
+caminho_do_grid <- file.path(
+  pasta_saida,
+  arquivo_entrada
+)
+
+if (!file.exists(caminho_do_grid)) {
+  stop(
+    "Arquivo '",
+    arquivo_entrada,
+    "' não encontrado em ",
+    caminho_do_grid,
+    ". ",
+    "Certifique-se de gerar o grid hexagonal para a resolução ",
+    resolucao_hex,
+    " antes de prosseguir."
+  )
+}
+
+# se TRUE, usa h3jsr::point_to_cell() para o join ponto -> hexágono
+# (mais rápido para bases grandes); se FALSE, usa st_join espacial
+USAR_JOIN_H3_RAPIDO <- TRUE
 
 # caminho dos polígonos oficiais de favelas e comunidades urbanas (IBGE 2022)
 arquivo_favelas <-
@@ -59,9 +97,9 @@ arquivo_favelas <-
     "qg_2022_670_fcu_agreg.shp"
   )
 
-# caminho da base bruta do Open Buildings (usada na Definição 2)
-arquivo_open_buildings <-
-  here(pasta_entrada, "open_buildings", "94d_buildings.csv")
+# pasta particionada do Open Buildings (usada na Definição 2)
+pasta_open_buildings_parquet <-
+  here(pasta_entrada, "open_buildings", "94d_buildings_parquet")
 
 
 # ==============================================================================
@@ -70,13 +108,28 @@ arquivo_open_buildings <-
 
 # carrega o grid hexagonal dasimétrico (já filtrado para áreas habitadas)
 grid_dasimetrico <-
-  readRDS(arquivo_grid_dasimetrico)
+  readRDS(caminho_do_grid)
 glimpse(grid_dasimetrico)
+
+# máscara do perímetro unificado da área de estudo, em WGS84 — usada para
+# filtrar espacialmente as edificações já dentro do DuckDB (ST_Intersects)
+mascara_regiao <-
+  grid_dasimetrico |>
+  st_transform(crs = 4326) |>
+  st_union() |>
+  st_make_valid()
+
+# bounding box em WGS84, usada como pré-filtro rápido de partições antes
+# do recorte espacial exato no DuckDB
+bbox_regiao <-
+  grid_dasimetrico |>
+  st_transform(crs = 4326) |>
+  st_bbox()
 
 # carrega os polígonos oficiais de favelas, filtrando o município de estudo
 favelas_sf <-
   read_sf(arquivo_favelas, options = "ENCODING=UTF-8") |>
-  filter(as.character(cd_mun) %in% codigo_municipio) |>
+  filter(as.character(cd_mun) %in% codigo_municipio_filtro) |>
   st_make_valid()
 
 # reprojeta o grid para SIRGAS 2000 / UTM 23S (metros), necessário para
@@ -141,42 +194,59 @@ print(round(prop.table(table(target_area_pura$is_slum)) * 100, 2))
 # favela. Isso evita contar como "ocupado" um terreno vazio ou uma via
 # larga que apenas geometricamente cai dentro do polígono.
 
-if (!file.exists(arquivo_open_buildings)) {
+if (!dir.exists(pasta_open_buildings_parquet)) {
   # se a base de edificações não estiver disponível, avisa e segue apenas
   # com a Definição 1 — o script não é interrompido
   warning(
-    "Arquivo do Open Buildings não encontrado em ",
-    arquivo_open_buildings,
+    "Pasta particionada do Open Buildings não encontrada em ",
+    pasta_open_buildings_parquet,
     " — pulando a Definição 2 (ponderada por edificação)."
   )
   target_edificacoes <- NULL
 } else {
-  # passo 1: importa as edificações e converte para pontos espaciais
-  edificacoes_sf <-
-    vroom(
-      arquivo_open_buildings,
-      col_select = c(longitude, latitude, area_in_meters, confidence),
-      show_col_types = FALSE
-    ) |>
-    rename(area_edificacao = area_in_meters) |>
-    filter(!is.na(latitude), !is.na(longitude)) |>
-    st_as_sf(coords = c("longitude", "latitude"), crs = 4326, remove = FALSE) |>
-    st_transform(crs = 31983)
+  # passo 1: importa e filtra as edificações via DuckDB (muito mais rápido e leve)
+  message("\nImportando e filtrando edificações via DuckDB...")
+  open_buildings_regiao <- ler_open_buildings_parquet(
+    pasta_parquet = pasta_open_buildings_parquet,
+    bbox_wgs84 = bbox_regiao,
+    mascara_regiao_sf = mascara_regiao,
+    tamanho_celula_particao = 0.1,
+    margem_graus = 0.01
+  )
 
   # passo 2: associa cada edificação ao hexágono em que ela está localizada
-  message("Vinculando edificações ao hexágono correspondente...")
-  edificacoes_com_hex <-
-    edificacoes_sf |>
-    st_join(select(grid_proj, id_hex), join = st_within) |>
-    filter(!is.na(id_hex))
+  if (USAR_JOIN_H3_RAPIDO) {
+    message(
+      "Vinculando edificações ao hexágono correspondente (h3jsr rápido)..."
+    )
+    edificacoes_com_hex <-
+      open_buildings_regiao |>
+      vincular_h3_rapido(resolucao_hex = resolucao_hex) |>
+      filter(!is.na(id_hex))
+  } else {
+    message(
+      "Vinculando edificações ao hexágono correspondente (st_join espacial)..."
+    )
+    edificacoes_com_hex <-
+      open_buildings_regiao |>
+      st_join(
+        select(grid_dasimetrico |> st_transform(crs = 4326), id_hex),
+        join = st_intersects
+      ) |>
+      filter(!is.na(id_hex))
+  }
 
   # passo 3: identifica quais edificações caem dentro de um polígono de favela
-  message("Identificando edificações dentro dos polígonos de favela...")
+  # Importante: reprojeta as edificações para SIRGAS 2000 (31983) antes de cruzar
+  message(
+    "Reprojetando e identificando edificações dentro dos polígonos de favela..."
+  )
   edificacoes_com_hex <-
     edificacoes_com_hex |>
+    st_transform(crs = 31983) |>
     mutate(
       dentro_favela = lengths(st_intersects(
-        edificacoes_com_hex,
+        geometry,
         favelas_proj
       )) >
         0
@@ -192,9 +262,9 @@ if (!file.exists(arquivo_open_buildings)) {
     summarise(
       n_edificacoes_total = n(),
       n_edificacoes_em_favela = sum(dentro_favela),
-      area_construida_total = sum(area_edificacao, na.rm = TRUE),
+      area_construida_total = sum(building_area, na.rm = TRUE),
       area_construida_em_favela = sum(
-        area_edificacao[dentro_favela],
+        building_area[dentro_favela],
         na.rm = TRUE
       ),
       .groups = "drop"
@@ -294,7 +364,10 @@ glimpse(target_area_pura)
 # definição 1: reproduz fielmente o critério do artigo original
 saveRDS(
   target_area_pura,
-  file.path(pasta_saida, "favelas_e_comunidades_urbanas_area_pura.rds")
+  file.path(
+    pasta_saida,
+    paste0("favelas_e_comunidades_urbanas_area_pura", sufixo_saida, ".rds")
+  )
 )
 
 # definição 2: critério alternativo, ponderado por edificação
@@ -303,15 +376,13 @@ if (!is.null(target_edificacoes)) {
     target_edificacoes,
     file.path(
       pasta_saida,
-      "favelas_e_comunidades_urbanas_ponderado_edificacoes.rds"
+      paste0(
+        "favelas_e_comunidades_urbanas_ponderado_edificacoes",
+        sufixo_saida,
+        ".rds"
+      )
     )
   )
 }
-
-message(
-  "\n>>> Rótulos salvos. Use 'favelas_e_comunidades_urbanas_area_pura.rds' ",
-  "para reproduzir o artigo fielmente, ou a versão '_ponderado_edificacoes' ",
-  "para testar a definição alternativa de rótulo."
-)
 
 # FIM ==========================================================================

@@ -1,0 +1,9 @@
+project:
+  type: default
+  # Garante que os caminhos relativos (here::here("R", "helpers.R"),
+  # o cache de dados e o cache do freeze) sejam sempre resolvidos a partir
+  # da raiz do projeto, e não do diretório de onde `quarto render` é chamado.
+  execute-dir: project
+
+execute:
+  freeze: auto

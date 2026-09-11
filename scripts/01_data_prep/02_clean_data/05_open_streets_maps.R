@@ -28,9 +28,6 @@ distancia_buffer <- 100
 # CRS métrico (SIRGAS 2000 / UTM 23S) usado para calcular buffers em metros
 crs_metrico <- 31983
 
-# caminho do grid hexagonal dasimétrico gerado no script de extração
-arquivo_grid_dasimetrico <- here(pasta_saida, "grid_dasimetrico.rds")
-
 # caminho do OpenStreetMaps gerado no script de extração
 arquivo_osm <- here(pasta_entrada, "open_street_maps.rds")
 
@@ -38,8 +35,43 @@ arquivo_osm <- here(pasta_entrada, "open_street_maps.rds")
 # 2. CARREGAR O GRID HEXAGONAL PRÉ-PROCESSADO
 # ==============================================================================
 
+# caminho do grid hexagonal dasimétrico gerado no script de extração
+# <- mude aqui (9, 10 ou 11) e rode de novo a cada vez
+resolucao_hex <- 11
+
+arquivos_entrada <- c(
+  "9" = "grid_dasimetrico_res9.rds",
+  "10" = "grid_dasimetrico_res10.rds",
+  "11" = "grid_dasimetrico_res11.rds"
+)
+
+# Puxa o nome do arquivo com base na seleção
+arquivo_entrada <- arquivos_entrada[[as.character(resolucao_hex)]]
+sufixo_saida <- paste0("_res", resolucao_hex)
+
+# Substitua 'pasta_saida' pela variável correta onde os
+# grids ficam salvos no seu projeto
+caminho_do_grid <- file.path(
+  pasta_saida,
+  arquivo_entrada
+)
+
+if (!file.exists(caminho_do_grid)) {
+  stop(
+    "Arquivo '",
+    arquivo_entrada,
+    "' não encontrado em ",
+    caminho_do_grid,
+    ". ",
+    "Certifique-se de gerar o grid hexagonal para a resolução ",
+    resolucao_hex,
+    " antes de prosseguir."
+  )
+}
+
+# carrega o grid hexagonal dasimétrico (já filtrado para áreas habitadas)
 grid_h3_sf <-
-  readRDS(arquivo_grid_dasimetrico)
+  readRDS(caminho_do_grid)
 glimpse(grid_h3_sf)
 
 
@@ -83,13 +115,12 @@ criar_buffer_vulnerabilidade <- function(dados_osm) {
 }
 
 # Calculando as zonas de amortecimento com buffers de 100 metros
-buffer_ferrovia <- criar_buffer_vulnerabilidade(linhas_trem)
-buffer_rodovia <- criar_buffer_vulnerabilidade(rodovias)
-buffer_energia <- criar_buffer_vulnerabilidade(linhas_energia)
-buffer_agua <- criar_buffer_vulnerabilidade(rios)
-buffer_natural <- criar_buffer_vulnerabilidade(corpos_dagua)
-buffer_aeroporto <- criar_buffer_vulnerabilidade(aeroportos_geom)
-
+buffer_ferrovia <- criar_buffer_vulnerabilidade(dados_osm$linhas_trem)
+buffer_rodovia <- criar_buffer_vulnerabilidade(dados_osm$rodovias)
+buffer_energia <- criar_buffer_vulnerabilidade(dados_osm$linhas_energia)
+buffer_agua <- criar_buffer_vulnerabilidade(dados_osm$rios)
+buffer_natural <- criar_buffer_vulnerabilidade(dados_osm$corpos_dagua)
+buffer_aeroporto <- criar_buffer_vulnerabilidade(dados_osm$aeroportos)
 
 # ==============================================================================
 # 5. REPROJEÇÃO DO GRID PARA O CRS MÉTRICO
@@ -150,9 +181,10 @@ osm_indicadores <-
   )
 glimpse(osm_indicadores)
 
+
 saveRDS(
   osm_indicadores,
-  file.path(pasta_saida, "open_street_maps.rds")
+  file.path(pasta_saida, paste0("open_street_maps", sufixo_saida, ".rds"))
 )
 
 # FIM ==========================================================================

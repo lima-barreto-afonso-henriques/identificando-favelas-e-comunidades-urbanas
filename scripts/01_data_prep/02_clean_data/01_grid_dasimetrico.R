@@ -9,20 +9,18 @@
 # 0. CARREGAR PACOTES E DEFINIR CAMINHOS
 # ==============================================================================
 # carrega funções e pacotes utilizados em todos os scripts do projeto
-# install.packages("here")
-# library(here)
 source(here::here("scripts", "00_functions", "00_setup.R"))
 
 # caminhos padronizados de entrada e saída
 pasta_entrada <- here("data", "raw")
 pasta_saida <- here("data", "processed")
 
-
 # ==============================================================================
 # 1. PARÂMETROS E FILTROS GEOGRÁFICOS
 # ==============================================================================
 
-# código do município (ou lista de códigos, para regiões metropolitanas)
+# código do município
+# (ou lista de códigos, para regiões metropolitanas)
 # ex.: 3550308 = São Paulo (SP)
 codigo_municipio_filtro <- "3550308"
 
@@ -42,8 +40,7 @@ municipio <-
 
 # inspeção rápida do resultado
 glimpse(municipio)
-skimr::skim(municipio)
-
+# skimr::skim(municipio)
 
 # ==============================================================================
 # 2. CONTORNO DA ÁREA DE ESTUDO
@@ -69,8 +66,11 @@ contorno_wgs84 <-
 # 3. GERAÇÃO DOS ÍNDICES HEXAGONAIS (H3)
 # ==============================================================================
 
-# resolução do grid H3 (quanto maior, menor e mais numerosos os hexágonos)
-resolucao_hex <- 10
+# resolução do grid H3
+# (quanto maior, menor e mais numerosos os hexágonos)
+# o  artigo utiliza  resolução 10
+resolucao_hex <- 11
+
 
 # preenche o contorno da área de estudo com células H3
 indices_hex <-
@@ -100,7 +100,7 @@ grid_hexagonal <-
 # (evita estouro de memória com muitos atributos)
 plot(
   st_geometry(grid_hexagonal),
-  main = "Grid Hexagonal H3"
+  main = paste0("Grid Hexagonal H3 - Resolução ", resolucao_hex, " ")
 )
 
 
@@ -131,7 +131,8 @@ contagem_domicilios <-
   summarise(num_residencias = n(), .groups = "drop")
 
 # mantém no grid apenas os hexágonos com domicílios
-# (inner_join descarta automaticamente as células sem correspondência na contagem)
+# (inner_join descarta
+# automaticamente as células sem correspondência na contagem)
 grid_dasimetrico <-
   grid_hexagonal |>
   inner_join(
@@ -142,7 +143,8 @@ grid_dasimetrico <-
 # plota o resultado final: grid filtrado apenas para as áreas habitadas
 plot(
   st_geometry(grid_dasimetrico),
-  main = "Grid Dasimétrico H3 (Apenas áreas habitadas)"
+  main = paste0("Grid Hexagonal H3 - Resolução ", resolucao_hex, " "),
+  sub = "somente áreas habitadas"
 )
 
 
@@ -150,17 +152,26 @@ plot(
 # 6. SALVAR OS RESULTADOS
 # ==============================================================================
 # formato .rds: leitura rápida dentro do próprio fluxo em R
+sufixo_saida <- paste0("_res", resolucao_hex)
+sufixo_saida
+
+# formato .rds: leitura rápida dentro do próprio fluxo em R
 saveRDS(
   grid_dasimetrico,
-  file = file.path(pasta_saida, "grid_dasimetrico.rds")
+  file = file.path(
+    pasta_saida,
+    paste0("grid_dasimetrico", sufixo_saida, ".rds")
+  )
 )
 
 # formato .gpkg: interoperável com QGIS e outros softwares de SIG
 st_write(
   obj = grid_dasimetrico,
-  dsn = file.path(pasta_saida, "grid_dasimetrico.gpkg"),
+  dsn = file.path(
+    pasta_saida,
+    paste0("grid_dasimetrico", sufixo_saida, ".gpkg")
+  ),
   driver = "GPKG",
   delete_dsn = TRUE
 )
-
 # FIM ==========================================================================

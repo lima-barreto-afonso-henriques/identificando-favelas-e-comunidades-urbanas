@@ -22,6 +22,25 @@
 # ponto-em-polígono para cada malha (setor e hexágono) e agregar por área.
 # Como o hexágono médio (~15.000 m²) é muito maior que uma edificação média
 # (~60-90 m²), a perda de precisão por não fatiar geometrias é desprezível.
+#
+# LEITURA DO OPEN BUILDINGS: usa a pasta Parquet PARTICIONADA
+# (94d_buildings_parquet/lat_bin=.../lon_bin=.../*.parquet), gerada uma
+# única vez pelo script de extração (Seção 5, via duckdb) a partir do
+# .csv.gz bruto — não um arquivo .parquet único. Por isso a leitura aqui
+# usa arrow::open_dataset() (entende o particionamento Hive-style
+# automaticamente), não arrow::read_parquet() (que espera um único
+# arquivo e falharia contra um diretório).
+#
+# Duas vantagens em cima do que já ganhamos ao sair do .csv.gz:
+#  1) leitura seletiva de colunas, sem materializar o arquivo inteiro em
+#     disco antes de indexar (mesmo motivo do parquet de arquivo único);
+#  2) PODA DE PARTIÇÃO (partition pruning): como o particionamento é por
+#     lat_bin/lon_bin, filtrar por essas colunas antes do collect() faz o
+#     arrow pular arquivos inteiros fora da bounding box da área de
+#     estudo, sem sequer abri-los — não só menos memória, menos I/O.
+#
+# Se a pasta particionada ainda não existir, rode o script de extração
+# (Seção 5) antes deste.
 # ==============================================================================
 
 # ==============================================================================
@@ -203,8 +222,17 @@ interpolar_dasimetrico_edificacoes <- function(
   # Otimização 2 acima — não precisamos mais de um left_join aqui.
   pesos_com_edificacao <-
     area_por_setor_hex |>
-    mutate(peso_dasimetrico = area_construida_hex / area_construida_setor) |>
-    select(code_tract, id_hex, peso_dasimetrico)
+    mutate(
+      peso_dasimetrico = area_construida_hex / area_construida_setor,
+      origem_peso = "edificacao"
+    ) |>
+    select(
+      code_tract,
+      id_hex,
+      peso_dasimetrico,
+      origem_peso,
+      area_construida_hex
+    )
 
   # --- Etapa E: peso por área pura para setores SEM edificação (fallback) ---
   # sem essa etapa, hexágonos que só tocam um setor sem edificações mapeadas
@@ -230,13 +258,137 @@ interpolar_dasimetrico_edificacoes <- function(
     pesos_fallback <-
       grid_x_setor_fallback |>
       left_join(area_total_setor_fallback, by = "code_tract") |>
-      mutate(peso_dasimetrico = area_intersecao / area_total_setor) |>
-      select(code_tract, id_hex, peso_dasimetrico)
+      mutate(
+        peso_dasimetrico = area_intersecao / area_total_setor,
+        origem_peso = "fallback_area",
+        area_construida_hex = NA_real_
+      ) |>
+      select(
+        code_tract,
+        id_hex,
+        peso_dasimetrico,
+        origem_peso,
+        area_construida_hex
+      )
 
     pesos_finais <- bind_rows(pesos_com_edificacao, pesos_fallback)
   } else {
     pesos_finais <- pesos_com_edificacao
   }
+
+  # --- Etapa E-bis: hexágonos com LACUNA DE DETECÇÃO (cenário b) ------------
+  # Cenário (b), descrito no comentário da Etapa E.1 abaixo, tinha uma
+  # consequência não tratada até aqui: um hexágono que toca um setor COM
+  # edificação mapeada, mas onde nenhuma dessas edificações cai dentro dele
+  # especificamente, nunca aparece em 'area_por_setor_hex' (que só existe
+  # para combinações setor×hexágono com pelo menos 1 edificação) — e também
+  # não entra no fallback da Etapa E, porque esse fallback é por SETOR
+  # inteiro sem nenhuma edificação, não por hexágono. Esse hexágono ficava
+  # simplesmente ausente de 'pesos_finais': sem diagnóstico, e silenciosamente
+  # zerado no left_join da Etapa F (mutate(coalesce(0))). Isso é uma
+  # DIFERENÇA de tratamento em relação à Opção 1 (área pura), que atribui
+  # peso a todo hexágono que intersecta o setor, sem depender de detecção de
+  # edificação — daí a divergência ficar concentrada exatamente nesses casos.
+  #
+  # Aqui identificamos esses pares (setor, hexágono) via st_join/st_intersects
+  # (mais barato que st_intersection, já que não precisamos da área exata:
+  # o peso desses pares é zero por definição, então só a existência do par
+  # importa) e os adicionamos a 'pesos_finais' com peso_dasimetrico = 0 e uma
+  # origem própria — isso não muda nenhum valor interpolado (peso 0 não
+  # contribui na soma ponderada da Etapa F), mas torna o cenário visível no
+  # diagnóstico por hexágono (Etapa E.1), em vez de ficar misturado,
+  # indistinguível, dentro do resultado final "==0 sem explicação".
+  setores_com_edificacao <-
+    setores_proj |>
+    anti_join(setores_sem_edificacao, by = "code_tract")
+
+  pares_hex_setor_com_edificacao <-
+    st_join(
+      select(grid_proj, id_hex),
+      select(setores_com_edificacao, code_tract),
+      join = st_intersects
+    ) |>
+    st_drop_geometry() |>
+    filter(!is.na(code_tract)) |>
+    distinct(id_hex, code_tract)
+
+  pares_com_lacuna <-
+    pares_hex_setor_com_edificacao |>
+    anti_join(
+      pesos_com_edificacao |> distinct(id_hex, code_tract),
+      by = c("id_hex", "code_tract")
+    )
+
+  n_pares_lacuna <- nrow(pares_com_lacuna)
+  message(sprintf(
+    paste0(
+      "%d combinações hexágono x setor têm LACUNA DE DETECÇÃO: o setor tem ",
+      "edificação mapeada em algum lugar, mas nenhuma cai dentro deste ",
+      "hexágono específico. Peso zero explícito atribuído (não afeta a ",
+      "soma ponderada), rotulado 'sem_deteccao_no_hex' no diagnóstico."
+    ),
+    n_pares_lacuna
+  ))
+
+  if (n_pares_lacuna > 0) {
+    pesos_lacuna <-
+      pares_com_lacuna |>
+      mutate(
+        peso_dasimetrico = 0,
+        origem_peso = "sem_deteccao_no_hex",
+        area_construida_hex = 0
+      ) |>
+      select(
+        code_tract,
+        id_hex,
+        peso_dasimetrico,
+        origem_peso,
+        area_construida_hex
+      )
+
+    pesos_finais <- bind_rows(pesos_finais, pesos_lacuna)
+  }
+
+  # --- Etapa E.1: diagnóstico de origem do peso, por hexágono ---------------
+  # Um hexágono pode ser cortado por mais de um setor (id_hex aparece em
+  # várias linhas de 'pesos_finais'). Aqui resumimos, por id_hex, quantos
+  # desses setores contribuintes vieram do fallback de área pura (Etapa E)
+  # vs. do peso por edificação (Etapa D) vs. da lacuna de detecção (Etapa
+  # E-bis). Isso é o que faltava para distinguir, na comparação com a Opção 1
+  # (área pura), três cenários que produzem sintomas superficiais parecidos
+  # (peso baixo/zero por edificação) mas têm causas diferentes:
+  #   (a) setor inteiro sem edificação mapeada -> fallback já ativado aqui
+  #       -> a divergência esperada contra a Opção 1 é pequena (mesmo método)
+  #   (b) setor com edificação mapeada, mas nenhuma cai dentro deste
+  #       hexágono específico -> peso zero LEGÍTIMO (não é bug de NaN/divisão
+  #       por zero, já que area_construida_setor > 0 aqui) -> divergência
+  #       esperada contra a Opção 1 é grande, e reflete uma lacuna de
+  #       detecção do Open Buildings nesse hexágono específico -> agora
+  #       rotulado explicitamente (Etapa E-bis), em vez de aparecer como
+  #       'n_setores_contribuintes = NA' no diagnóstico anterior
+  #   (c) hexágono fora de qualquer setor (fora da área de estudo) -> nem
+  #       aparece em 'pesos_finais', continua como NA no diagnóstico
+  diagnostico_pesos_hex <-
+    pesos_finais |>
+    group_by(id_hex) |>
+    summarise(
+      n_setores_contribuintes = n(),
+      n_setores_fallback = sum(origem_peso == "fallback_area"),
+      n_setores_sem_deteccao = sum(origem_peso == "sem_deteccao_no_hex"),
+      area_construida_hex_soma = sum(area_construida_hex, na.rm = TRUE),
+      .groups = "drop"
+    ) |>
+    mutate(
+      usou_fallback_area = n_setores_fallback > 0,
+      fallback_parcial = usou_fallback_area &
+        (n_setores_fallback < n_setores_contribuintes),
+      tem_lacuna_deteccao = n_setores_sem_deteccao > 0,
+      # hexágono onde TODOS os setores contribuintes só entraram via lacuna
+      # de detecção (peso 0 em tudo) -> resultado final = 0 "genuíno", mas
+      # agora explicável, em vez de indistinguível de "fora da área de
+      # estudo" ou de um zero por outro motivo
+      so_lacuna_deteccao = n_setores_sem_deteccao == n_setores_contribuintes
+    )
 
   # --- Etapa F: transfere contagens absolutas usando o peso final -----------
   dados_censo_absolutos <-
@@ -292,7 +444,43 @@ interpolar_dasimetrico_edificacoes <- function(
   }
 
   attr(resultado, "n_setores_fallback_area_pura") <- n_fallback
+  attr(resultado, "diagnostico_pesos") <- diagnostico_pesos_hex
   resultado
+}
+
+
+# caminho do grid hexagonal dasimétrico gerado no script de extração
+# <- mude aqui (9, 10 ou 11) e rode de novo a cada vez
+resolucao_hex <- 11
+
+arquivos_entrada <- c(
+  "9" = "grid_dasimetrico_res9.rds",
+  "10" = "grid_dasimetrico_res10.rds",
+  "11" = "grid_dasimetrico_res11.rds"
+)
+
+# Puxa o nome do arquivo com base na seleção
+arquivo_entrada <- arquivos_entrada[[as.character(resolucao_hex)]]
+sufixo_saida <- paste0("_res", resolucao_hex)
+
+# Substitua 'pasta_saida' pela variável correta onde os
+# grids ficam salvos no seu projeto
+caminho_do_grid <- file.path(
+  pasta_saida,
+  arquivo_entrada
+)
+
+if (!file.exists(caminho_do_grid)) {
+  stop(
+    "Arquivo '",
+    arquivo_entrada,
+    "' não encontrado em ",
+    caminho_do_grid,
+    ". ",
+    "Certifique-se de gerar o grid hexagonal para a resolução ",
+    resolucao_hex,
+    " antes de prosseguir."
+  )
 }
 
 
@@ -304,12 +492,15 @@ if (sys.nframe() == 0) {
   # ajuste fino de sensibilidade do filtro de confiança do Open Buildings
   confidence_min_open_buildings <- 0
 
-  arquivo_grid <- file.path(pasta_saida, "grid_dasimetrico.rds")
+  arquivo_grid <- caminho_do_grid
   arquivo_setores <- file.path(pasta_saida, "ibge_censo.rds")
+
+  # arquivo .parquet (colunar) em vez do .csv.gz bruto — ver nota no
+  # cabeçalho do script sobre por que e como gerar esse .parquet
   arquivo_open_buildings <- here(
     pasta_entrada,
     "open_buildings",
-    "94d_buildings.csv.gz"
+    "94d_buildings_parquet"
   )
 
   # falha explícita se as dependências não existirem — sem fallback
@@ -325,25 +516,37 @@ if (sys.nframe() == 0) {
   }
   if (!file.exists(arquivo_open_buildings)) {
     stop(
-      "Arquivo bruto do Open Buildings não encontrado em '",
+      "Arquivo/Diretório '",
       arquivo_open_buildings,
-      "'. Ajuste o caminho conforme o layout ",
-      "usado no script de morfologia urbana."
+      "' não encontrado. Este script espera o Open Buildings já ",
+      "convertido para .parquet particionado. Se você só tem o ",
+      ".csv.gz bruto, converta uma única vez usando arrow::write_dataset()\n"
     )
   }
 
   grid_base <- readRDS(arquivo_grid)
   setores_ibge <- readRDS(arquivo_setores)
 
+  # Captura a bounding box da área de estudo em WGS84 (lat/lon)
+  # para usar como filtro no Arrow (partition pruning / predicate pushdown)
+  bbox_estudo <- st_bbox(st_transform(setores_ibge, crs = 4326))
+
   # importa as edificações como PONTOS individuais (não a agregação por
   # hexágono já salva pelo script de morfologia urbana) — este método
-  # precisa da localização exata de cada edificação
+  # precisa da localização exata de cada edificação.
+  # arrow::open_dataset() entende a pasta particionada. O filter() antes
+  # do collect() faz a poda de partição/arquivos, lendo só o necessário
+  # sem descomprimir/materializar o arquivo inteiro em um temporário.
   edificacoes_raw <-
-    vroom(
-      arquivo_open_buildings,
-      col_select = c(longitude, latitude, area_in_meters, confidence),
-      show_col_types = FALSE
+    arrow::open_dataset(arquivo_open_buildings) |>
+    select(longitude, latitude, area_in_meters, confidence) |>
+    filter(
+      latitude >= bbox_estudo["ymin"],
+      latitude <= bbox_estudo["ymax"],
+      longitude >= bbox_estudo["xmin"],
+      longitude <= bbox_estudo["xmax"]
     ) |>
+    collect() |>
     rename(building_area = area_in_meters) |>
     filter(!is.na(latitude), !is.na(longitude)) |>
     st_as_sf(coords = c("longitude", "latitude"), crs = 4326, remove = FALSE)
@@ -385,6 +588,10 @@ if (sys.nframe() == 0) {
       confidence_min = confidence_min_open_buildings
     )
 
+  # extrai o diagnóstico ANTES do mutate/select seguinte — atributos
+  # personalizados não sobrevivem de forma garantida a verbos do dplyr
+  diagnostico_pesos_hex <- attr(resultado_bruto, "diagnostico_pesos")
+
   ibge_social_dasimetrico_edificacoes <-
     resultado_bruto |>
     mutate(
@@ -425,9 +632,26 @@ if (sys.nframe() == 0) {
 
   glimpse(ibge_social_dasimetrico_edificacoes)
 
+  sufixo_saida <- paste0("_res", resolucao_hex)
+
   saveRDS(
     ibge_social_dasimetrico_edificacoes,
-    file.path(pasta_saida, "ibge_social_dasimetrico_edificacoes.rds")
+    file.path(
+      pasta_saida,
+      paste0("ibge_social_dasimetrico_edificacoes", sufixo_saida, ".rds")
+    )
+  )
+
+  # salvo à parte (não dentro do arquivo principal) para não alterar o
+  # esquema de colunas que outros scripts já esperam de
+  # 'ibge_social_dasimetrico_edificacoes' — este é um arquivo de apoio,
+  # consumido apenas pelo script de comparação (01)
+  saveRDS(
+    diagnostico_pesos_hex,
+    file.path(
+      pasta_saida,
+      paste0("diagnostico_pesos_edificacoes", sufixo_saida, ".rds")
+    )
   )
 
   message(

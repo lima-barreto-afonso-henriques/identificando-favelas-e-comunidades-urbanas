@@ -23,6 +23,20 @@ pasta_entrada <- here("data", "raw")
 pasta_saida <- here("data", "processed")
 
 
+# ----------------------------------------------------------------------
+# SELETOR DE RESOLUÇÃO
+# ----------------------------------------------------------------------
+# <- mude aqui (9, 10 ou 11) e rode de novo a cada vez
+resolucao_hex <- 11
+
+pasta_saida <- here("data", "processed")
+pasta_outputs <- here("outputs", "comparacao_dasimetria")
+if (!dir.exists(pasta_outputs)) {
+  dir.create(pasta_outputs, recursive = TRUE)
+}
+
+sufixo <- paste0("_res", resolucao_hex)
+
 # ==============================================================================
 # 1. IMPORTAR OS INGREDIENTES
 # ==============================================================================
@@ -32,38 +46,66 @@ pasta_saida <- here("data", "processed")
 # correspondem a nenhuma saída existente no pipeline atual.
 
 # importar o grid hexagonal dasimétrico
+arquivo_grid_dasimetrico <- file.path(
+  pasta_saida,
+  paste0("grid_dasimetrico", sufixo, ".rds")
+)
+
 grid_dasimetrico <-
-  readRDS(file.path(pasta_saida, "grid_dasimetrico.rds")) |>
+  readRDS(arquivo_grid_dasimetrico) |>
   st_as_sf() |>
   rename(number_private_residences = num_residencias)
 glimpse(grid_dasimetrico)
 
 # importa os indicadores sociais do Censo
 # (interpolação por área pura)
+arquivo_ibge_censo_area_pura <- file.path(
+  pasta_saida,
+  paste0("ibge_social_area_pura", sufixo, ".rds")
+)
+
 ibge_censo_area_pura <-
-  readRDS(file.path(pasta_saida, "ibge_social_area_pura.rds"))
+  readRDS(arquivo_ibge_censo_area_pura)
 glimpse(ibge_censo_area_pura)
 
+
 # importa os indicadores de vulnerabilidade física (OSM)
+arquivo_osm_data <- file.path(
+  pasta_saida,
+  paste0("open_street_maps", sufixo, ".rds")
+)
+
 osm_data <-
-  readRDS(file.path(pasta_saida, "open_street_maps.rds"))
+  readRDS(arquivo_osm_data)
 glimpse(osm_data)
 
 # importa os indicadores de morfologia urbana (Open Buildings)
+arquivo_buildings_data <- file.path(
+  pasta_saida,
+  paste0("open_buildings", sufixo, ".rds")
+)
+
 buildings_data <-
-  readRDS(file.path(pasta_saida, "open_buildings.rds"))
+  readRDS(arquivo_buildings_data)
 glimpse(buildings_data)
 
 # importando a declividade média (Topodata)
+arquivo_topodata <- file.path(
+  pasta_saida,
+  paste0("topodata_declividade", sufixo, ".rds")
+)
+
 topodata <-
-  readRDS(file.path(pasta_saida, "topodata_declividade.rds"))
+  readRDS(arquivo_topodata)
 glimpse(topodata)
 
 # importando a variável alvo (favelas e comunidades urbanas)...")
-favelas_data <- readRDS(file.path(
+arquivo_favelas <- file.path(
   pasta_saida,
-  "favelas_e_comunidades_urbanas_area_pura.rds"
-))
+  paste0("favelas_e_comunidades_urbanas_area_pura", sufixo, ".rds")
+)
+
+favelas_data <- readRDS(arquivo_favelas)
 glimpse(favelas_data)
 
 
@@ -79,7 +121,7 @@ glimpse(favelas_data)
 
 tabelas_para_checar <- list(
   grid_dasimetrico = grid_dasimetrico,
-  ibge_censo = ibge_censo,
+  ibge_censo = ibge_censo_area_pura,
   osm_data = osm_data,
   buildings_data = buildings_data,
   topodata = topodata,
@@ -109,7 +151,7 @@ for (nome_tabela in names(tabelas_para_checar)) {
 
 grid_hexagonal <-
   grid_dasimetrico |>
-  left_join(st_drop_geometry(ibge_censo), by = "id_hex") |>
+  left_join(st_drop_geometry(ibge_censo_area_pura), by = "id_hex") |>
   left_join(osm_data, by = "id_hex") |>
   left_join(buildings_data, by = "id_hex") |>
   left_join(topodata, by = "id_hex") |>
@@ -137,9 +179,14 @@ assertthat::assert_that(
 # 5. SALVAR
 # ==============================================================================
 
+sufixo_saida <- paste0("_res", resolucao_hex)
+
 saveRDS(
   grid_hexagonal,
-  file.path(pasta_saida, "grid_hexagonal_artigo.rds")
+  file.path(
+    pasta_saida,
+    paste0("grid_hexagonal_area_pura", sufixo_saida, ".rds")
+  )
 )
 
 # FIM ==========================================================================

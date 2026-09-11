@@ -115,13 +115,48 @@ interpolar_area_pura <- function(grid_proj, setores_proj, colunas_contagem) {
   resultado
 }
 
+# caminho do grid hexagonal dasimétrico gerado no script de extração
+# <- mude aqui (9, 10 ou 11) e rode de novo a cada vez
+resolucao_hex <- 9
+
+arquivos_entrada <- c(
+  "9" = "grid_dasimetrico_res9.rds",
+  "10" = "grid_dasimetrico_res10.rds",
+  "11" = "grid_dasimetrico_res11.rds"
+)
+
+# Puxa o nome do arquivo com base na seleção
+arquivo_entrada <- arquivos_entrada[[as.character(resolucao_hex)]]
+sufixo_saida <- paste0("_res", resolucao_hex)
+
+# Substitua 'pasta_saida' pela variável correta onde os
+# grids ficam salvos no seu projeto
+caminho_do_grid <- file.path(
+  pasta_saida,
+  arquivo_entrada
+)
+
+if (!file.exists(caminho_do_grid)) {
+  stop(
+    "Arquivo '",
+    arquivo_entrada,
+    "' não encontrado em ",
+    caminho_do_grid,
+    ". ",
+    "Certifique-se de gerar o grid hexagonal para a resolução ",
+    resolucao_hex,
+    " antes de prosseguir."
+  )
+}
 
 # ==============================================================================
 # 2. EXECUÇÃO (SE RODADO DIRETAMENTE, NÃO VIA source())
 # ==============================================================================
 
 if (sys.nframe() == 0) {
-  grid_base <- readRDS(file.path(pasta_saida, "grid_dasimetrico.rds"))
+  grid_base <- readRDS(caminho_do_grid)
+  # carrega o grid hexagonal dasimétrico
+  # (já filtrado para áreas habitadas)
   setores_ibge <- readRDS(file.path(pasta_saida, "ibge_censo.rds"))
 
   grid_proj <-
@@ -193,9 +228,14 @@ if (sys.nframe() == 0) {
 
   glimpse(ibge_social_area_pura)
 
+  sufixo_saida <- paste0("_res", resolucao_hex)
+
   saveRDS(
     ibge_social_area_pura,
-    file.path(pasta_saida, "ibge_social_area_pura.rds")
+    file.path(
+      pasta_saida,
+      paste0("ibge_social_area_pura", sufixo_saida, ".rds")
+    )
   )
 
   message(">>> [Opção 1] Interpolação por área pura concluída e salva.")
