@@ -28,7 +28,7 @@ if (!dir.exists(pasta_saida)) {
 # a resolução está fixada para rodar esse
 # script individualmente para cada resolução (9, 10 ou 11).
 # <- mude aqui (9, 10 ou 11) e rode de novo a cada vez
-resolucao_hex <- 10
+resolucao_hex <- 9
 
 # delimita os arquivos possíveis de serem utilizados
 arquivos_entrada <- c(
@@ -313,7 +313,7 @@ resultados_folds <-
     .options = furrr::furrr_options(seed = TRUE)
   )
 
-# Desligar o processamento paralelo ao fim das operações
+# desliga o processamento paralelo ao fim das operações
 future::plan(sequential)
 
 # 6.4. Sumarizar as métricas (tirar a média dos 100 folds) e juntar tudo
@@ -614,7 +614,7 @@ print(trade_off)
 # ==============================================================================
 # Atualiza a pasta de saída para incluir a subpasta
 # correspondente ao tipo de grid
-pasta_saida <- file.path(here::here("outputs", "artefato"), tipo_grid)
+pasta_saida <- file.path(here::here("outputs", "artefato", "dt"), tipo_grid)
 dir.create(pasta_saida, recursive = TRUE, showWarnings = FALSE)
 
 

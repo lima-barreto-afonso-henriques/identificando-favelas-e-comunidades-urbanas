@@ -5,7 +5,7 @@
 # Este script NÃO é uma proposta de pipeline correto. Ele reproduz, de
 # propósito, um erro metodológico comum: aplicar o SMOTENC no dataset
 # INTEIRO antes de gerar os folds de validação cruzada, em vez de aplicá-lo
-# apenas dentro de cada fold de treino (como o script 02/02b fazem
+# apenas dentro de cada fold de treino (como o script 02a/02b fazem
 # corretamente via 'step_smotenc()' dentro da recipe).
 #
 # A frase do artigo (Apêndice A) que descreve o procedimento é ambígua:
@@ -43,8 +43,9 @@
 # direta a favor dessa hipótese refinada.
 #
 # COMO USAR:
-# Rode este script DEPOIS do 02_article_sensibility_analysis.R (ou do 02b
-# com Random Forest). Ele reaproveita a mesma estrutura de dados, os mesmos
+# Rode este script DEPOIS do 01a_article_sensibility_analysis_dt.R
+# (ou do 02_article_sensibility_analysis_dt.R com Random Forest).
+# Ele reaproveita a mesma estrutura de dados, os mesmos
 # 100 folds (mesma seed) e o mesmo modelo, mudando SOMENTE a posição do
 # balanceamento SMOTENC. No final, os artefatos são comparados lado a
 # lado — se os números deste script 03 ficarem muito mais próximos da
@@ -57,29 +58,59 @@
 # ==============================================================================
 gc()
 
+# carrega funções e pacotes utilizados em todos os scripts do projeto
 source(here::here("scripts", "00_functions", "00_setup.R"))
 
+# caminhos padronizados de entrada/saída
 pasta_entrada <- here("data", "processed")
 pasta_saida <- here("outputs", "artefato")
 
+# se necessário criação das pastas dentro do caminho do projeto
 if (!dir.exists(pasta_saida)) {
   dir.create(pasta_saida, recursive = TRUE)
 }
 
 # ==============================================================================
-# 1. CARREGAR E PREPARAR DADOS (idêntico aos scripts 02/02b)
+# 1. CARREGAR E PREPARAR DADOS (idêntico aos scripts 02a/02b)
+# ==============================================================================
+# a resolução está fixada para rodar esse
+# script individualmente para cada resolução (9, 10 ou 11).
+# <- mude aqui (9, 10 ou 11) e rode de novo a cada vez
+resolucao_hex <- 9
+
+# delimita os arquivos possíveis de serem utilizados
+arquivos_entrada <- c(
+  "9" = "grid_hexagonal_res9.rds",
+  "10" = "grid_hexagonal_artigo.rds",
+  "11" = "grid_hexagonal_res11.rds"
+)
+
+# GRID HEXAGONAL -------------------------------------------------------------------
+sufixo_saida <- paste0("_res", resolucao_hex)
+
+# Defina a opção desejada: "area_pura" ou "ponderado_edificacoes"
+tipo_grid <- "area_pura" # ou "ponderado_edificacoes"
+
+# caminho do arquivo
+caminho_grid_hexagonal <- file.path(
+  pasta_entrada,
+  paste0("grid_hexagonal_", tipo_grid, sufixo_saida, ".rds")
+)
+
+# leitura do arquivo
+grid_hexagonal <-
+  readRDS(caminho_grid_hexagonal)
+
+# ==============================================================================
+# 2. PRÉ-PROCESSAMENTO (alinhado ao artigo)
 # ==============================================================================
 grid_hexagonal <-
-  readRDS(
-    file.path(
-      pasta_entrada,
-      "grid_hexagonal_artigo.rds"
-    )
-  )
-
-grid_hexagonal <-
   grid_hexagonal |>
+  # UTM
   st_transform(31983) |>
+  # Seleção explícita de preditores — evita que colunas de metadado
+  # administrativo (ou um eventual rótulo alternativo) entrem como
+  # preditoras sem querer.
   select(
     id_hex,
     slum_coverage_pct,
@@ -100,6 +131,7 @@ grid_hexagonal <-
     standard_deviation_of_building_area,
     avg_slope_topodata
   ) |>
+  # filtro dasimétrico básico
   filter(number_private_residences > 0) |>
   mutate(
     across(
@@ -108,11 +140,33 @@ grid_hexagonal <-
     )
   )
 
+
+# Limpeza de atributos residuais de sf
+# é barata e continua sendo boa prática manter o data.frame "puro" antes de
+# qualquer uso com future/furrr.
+limpar_atributos_sf <- function(df) {
+  df <- as.data.frame(df)
+  attrs_para_remover <- c("sf_column", "agr", "relation_to_geometry")
+  for (a in attrs_para_remover) {
+    attr(df, a) <- NULL
+  }
+  class(df) <- "data.frame"
+  tibble::as_tibble(df)
+}
+
 grid_df <-
   grid_hexagonal |>
-  st_drop_geometry()
+  st_drop_geometry() |>
+  limpar_atributos_sf()
 
+message(
+  "Tamanho de grid_df após limpeza (lobstr::obj_size): ",
+  format(lobstr::obj_size(grid_df), units = "MB")
+)
+
+# visualização e inspeção do arquivo
 glimpse(grid_df)
+skimr::skim(grid_df)
 
 # ==============================================================================
 # 2. PARALELIZAÇÃO — SEMPRE SEQUENCIAL NESTE SCRIPT (leia antes de mudar)
@@ -436,7 +490,6 @@ print(tabela_A4_leak |> select(-limiar))
 # ==============================================================================
 # 7. COMPARAÇÃO TRIPLA: ARTIGO x SCRIPT 02 (honesto) x SCRIPT 03 (leakage)
 # ==============================================================================
-
 tabela_artigo_A4 <- tibble::tribble(
   ~Threshold  , ~Accuracy , ~Precision , ~Recall , ~ROC_AUC , ~F1  ,
   "limiar_10" , 0.85      , 0.84       , 0.87    , 0.85     , 0.85 ,
@@ -449,8 +502,24 @@ tabela_artigo_A4 <- tibble::tribble(
 ) |>
   mutate(origem = "Artigo (Tabela A.4)")
 
-caminho_artefato_02 <- file.path(pasta_saida, "sensibilidade_artigo.rds")
-caminho_artefato_03 <- file.path(pasta_saida, "sensibilidade_artigo_rf.rds")
+# Atualiza a pasta de saída para incluir a subpasta "leakage" e o tipo de grid
+pasta_saida <- file.path(
+  here::here("outputs", "artefato", "leakage"),
+  tipo_grid
+)
+dir.create(pasta_saida, recursive = TRUE, showWarnings = FALSE)
+
+# Caminhos dos artefatos baseados na estrutura padronizada dos scripts 01a e 01b
+caminho_artefato_02 <- file.path(
+  here::here("outputs", "artefato", "dt"),
+  tipo_grid,
+  paste0("sensibilidade_artigo", sufixo_saida, ".rds")
+)
+caminho_artefato_03 <- file.path(
+  here::here("outputs", "artefato", "rf"),
+  tipo_grid,
+  paste0("sensibilidade_artigo_rf", sufixo_saida, ".rds")
+)
 
 if (file.exists(caminho_artefato_02)) {
   artefato_02 <- readRDS(caminho_artefato_02)
@@ -461,11 +530,11 @@ if (file.exists(caminho_artefato_02)) {
 
     artefato_02$tabela_A4 |>
       select(-limiar, -Specificity, -FPR, -any_of("youden_j")) |>
-      mutate(origem = "Script 02 — honesto (SMOTENC só no treino)"),
+      mutate(origem = "Script 01a — honesto (SMOTENC só no treino)"),
 
     tabela_A4_leak |>
       select(-limiar, -Specificity, -FPR) |>
-      mutate(origem = "Script 03 — com leakage (SMOTENC antes do split)")
+      mutate(origem = "Script 01c — com leakage (SMOTENC antes do split)")
   )
 
   # Verifica se o artefato RF existe e o inclui na lista
@@ -474,10 +543,12 @@ if (file.exists(caminho_artefato_02)) {
 
     tabelas_para_unir[[4]] <- artefato_03$tabela_A4 |>
       select(-limiar, -Specificity, -FPR, -any_of("youden_j")) |>
-      mutate(origem = "Script RF — Random Forest (sensibilidade_artigo_rf)")
+      mutate(origem = "Script 01b — Random Forest (sensibilidade_artigo_rf)")
   } else {
     message(
-      "Aviso: Artefato do Random Forest (sensibilidade_artigo_rf.rds) não ",
+      "Aviso: Artefato do Random Forest (",
+      paste0("sensibilidade_artigo_rf", sufixo_saida, ".rds"),
+      ") não ",
       "encontrado. Pulando inclusão."
     )
   }
@@ -494,17 +565,18 @@ if (file.exists(caminho_artefato_02)) {
     file.path(
       pasta_saida,
       "tables",
-      "comparacao_artigo_honesto_leakage_rf.csv"
+      paste0("comparacao_artigo_honesto_leakage_rf", sufixo_saida, ".csv")
     )
   )
 } else {
   message(
-    "Artefato do script 02 não encontrado. Rode 02_article_sensibility_",
-    "analysis.R primeiro para habilitar a comparação completa."
+    "Artefato do script 01a não encontrado. Rode 01a_article_sensibility_dt.R ",
+    "primeiro para habilitar a comparação completa."
   )
 }
 
 print(comparacao_multipla, n = Inf)
+
 
 # ==============================================================================
 # 8. EXPORTAÇÃO
@@ -522,24 +594,35 @@ artefato_leak <- list(
 
 saveRDS(
   artefato_leak,
-  file.path(pasta_saida, "sensibilidade_leakage_demo.rds")
+  file.path(
+    pasta_saida,
+    paste0("sensibilidade_leakage_demo", sufixo_saida, ".rds")
+  )
 )
 
 readr::write_csv(
   tabela_A4_leak,
-  file.path(pasta_saida, "tables", "tabela_A4_leakage_demo.csv")
+  file.path(
+    pasta_saida,
+    "tables",
+    paste0("tabela_A4_leakage_demo", sufixo_saida, ".csv")
+  )
 )
 
 readr::write_csv(
   fracao_sintetica_por_limiar,
-  file.path(pasta_saida, "tables", "fracao_sintetica_por_limiar.csv")
+  file.path(
+    pasta_saida,
+    "tables",
+    paste0("fracao_sintetica_por_limiar", sufixo_saida, ".csv")
+  )
 )
 
 ggplot2::ggsave(
   filename = file.path(
     pasta_saida,
     "figures",
-    "fracao_sintetica_por_limiar.pdf"
+    paste0("fracao_sintetica_por_limiar", sufixo_saida, ".pdf")
   ),
   plot = plot_fracao_sintetica,
   width = 10,
