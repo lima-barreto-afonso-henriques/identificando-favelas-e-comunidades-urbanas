@@ -1,0 +1,4 @@
+cluster,mediana_households_connected_to_water_supply_network,mediana_households_connected_to_sewerage_system,mediana_number_of_buildings,mediana_avg_building_area,mediana_number_private_residences,mediana_avg_slope_topodata
+1,0.44658190393886565,0.0042837094914083855,49,50.22912093023256,23,23.893718613518608
+2,1,0.9287360122390574,144,51.988126119402985,193,15.243824154138565
+3,1,0.38716498674314326,73,60.9089375,60,16.02753784921434

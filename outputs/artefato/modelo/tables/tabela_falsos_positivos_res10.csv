@@ -1,0 +1,3 @@
+Cenario,N_Falsos_Positivos,Pct_Total_Hexagonos
+Limiar do artigo (70%),288,0.005338770970432848
+"Limiar otimizado, diagnóstico (0.20)",5850,0.10844378533691723

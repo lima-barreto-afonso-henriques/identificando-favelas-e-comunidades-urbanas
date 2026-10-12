@@ -12,7 +12,7 @@ source(here::here("scripts", "00_functions", "01_utils.R"))
 # SELETOR DE RESOLUÇÃO
 # ----------------------------------------------------------------------
 # <- mude aqui (9, 10 ou 11) e rode de novo a cada vez
-resolucao_hex <- 11
+resolucao_hex <- 10
 
 pasta_saida <- here("data", "processed")
 pasta_outputs <- here("outputs", "comparacao_dasimetria")

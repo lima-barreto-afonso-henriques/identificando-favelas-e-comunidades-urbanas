@@ -26,11 +26,13 @@
 #      Isso por si só já infla Precision e F1, porque essas métricas são
 #      sensíveis à taxa de base (base rate) da classe positiva.
 #
-# HIPÓTESE REFINADA (adicionada após comparar DT x RF honestos x artigo):
+# HIPÓTESE REFINADA
+# (adicionada após comparar Decision Tree x Random Forest honestos x artigo):
 # Nos dois modelos honestos (DT e RF), a Precision CAI conforme o limiar
 # sobe (classe "Slum" fica mais rara) — comportamento estatisticamente
-# esperado. Na Tabela A.4 do artigo, a Precision SOBE com o limiar — o
-# oposto. Uma explicação possível: como 'over_ratio = 0.5' sempre busca
+# esperado.
+# Na Tabela A.4 do artigo, a Precision SOBE com o limiar — o oposto.
+# Uma explicação possível: como 'over_ratio = 0.5' sempre busca
 # a MESMA proporção final (~33%) de positivos, quanto mais rara for a
 # classe "Slum" de partida (limiares altos), MAIS pontos sintéticos
 # proporcionalmente o SMOTENC precisa gerar para chegar lá — ou seja, a
@@ -44,7 +46,7 @@
 #
 # COMO USAR:
 # Rode este script DEPOIS do 01a_article_sensibility_analysis_dt.R
-# (ou do 02_article_sensibility_analysis_dt.R com Random Forest).
+# (ou do 02_article_sensibility_analysis_rf.R com Random Forest).
 # Ele reaproveita a mesma estrutura de dados, os mesmos
 # 100 folds (mesma seed) e o mesmo modelo, mudando SOMENTE a posição do
 # balanceamento SMOTENC. No final, os artefatos são comparados lado a
@@ -76,7 +78,7 @@ if (!dir.exists(pasta_saida)) {
 # a resolução está fixada para rodar esse
 # script individualmente para cada resolução (9, 10 ou 11).
 # <- mude aqui (9, 10 ou 11) e rode de novo a cada vez
-resolucao_hex <- 9
+resolucao_hex <- 10
 
 # delimita os arquivos possíveis de serem utilizados
 arquivos_entrada <- c(
@@ -88,7 +90,8 @@ arquivos_entrada <- c(
 # GRID HEXAGONAL -------------------------------------------------------------------
 sufixo_saida <- paste0("_res", resolucao_hex)
 
-# Defina a opção desejada: "area_pura" ou "ponderado_edificacoes"
+# Defina a opção desejada:
+# "area_pura" ou "ponderado_edificacoes"
 tipo_grid <- "area_pura" # ou "ponderado_edificacoes"
 
 # caminho do arquivo
@@ -108,7 +111,7 @@ grid_hexagonal <-
   grid_hexagonal |>
   # UTM
   st_transform(31983) |>
-  # Seleção explícita de preditores — evita que colunas de metadado
+  # seleção explícita de preditores — evita que colunas de metadado
   # administrativo (ou um eventual rótulo alternativo) entrem como
   # preditoras sem querer.
   select(
@@ -404,8 +407,9 @@ resultados_leak <- purrr::map(
     model_spec = dt_spec
   )
 )
-# resultados_leak
-#
+resultados_leak
+
+
 future::plan(sequential)
 
 resultados_folds_leak <-
@@ -422,9 +426,8 @@ print(prevalencia_por_limiar)
 # 'distribuicao_limiares' no script 02 — a diferença é a evidência direta
 # de que a validação deixou de refletir a prevalência real.
 
-message(
-  "\n=== Fração de 'Slum' sintético nos folds de validação, por limiar ==="
-)
+# Fração de 'Slum' sintético nos folds de validação, por limiar
+
 print(fracao_sintetica_por_limiar)
 # LEITURA: se 'fracao_sintetica_slum_media' CRESCER do limiar_10 para o
 # limiar_70, isso é evidência direta a favor da hipótese refinada: a
@@ -434,21 +437,40 @@ print(fracao_sintetica_por_limiar)
 
 plot_fracao_sintetica <-
   fracao_sintetica_por_limiar |>
-  ggplot(aes(x = limiar * 100, y = fracao_sintetica_slum_media * 100)) +
+  ggplot(aes(x = limiar, y = fracao_sintetica_slum_media)) +
   geom_line(linewidth = 1, color = "#d7301f") +
   geom_point(size = 3, color = "#d7301f") +
-  scale_x_continuous(breaks = seq(10, 70, 10)) +
+  scale_x_continuous(
+    breaks = seq(0, 0.7, by = 0.1),
+    labels = percent_format(accuracy = 1)
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, 1.0, by = 0.1),
+    labels = percent_format(accuracy = 1),
+    limits = c(0, 1)
+  ) +
   labs(
     title = "Fração de 'Slum' sintético nos folds de validação, por limiar",
     subtitle = paste(
       "Teste da hipótese refinada: o vazamento piora conforme a classe",
       "'Slum' real fica mais rara?"
     ),
-    x = "Limiar de cobertura (%)",
-    y = "% de 'Slum' sintético na validação"
+    x = "Limiar de cobertura",
+    y = "Porcentagem de 'Slum' sintético na validação"
   ) +
   theme_minimal() +
-  theme(plot.title = element_text(face = "bold"))
+  theme(plot.title = element_text(face = "bold")) +
+  theme(
+    axis.title.x = element_text(size = 10, margin = margin(t = 6)),
+    axis.title.y = element_text(size = 10, margin = margin(r = 6)),
+    axis.text = element_text(size = 9, color = "black"),
+    legend.position = "bottom",
+    legend.title = element_blank(),
+    legend.text = element_text(size = 9),
+    legend.margin = margin(t = -5),
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(color = "gray92", linewidth = 0.3)
+  )
 
 print(plot_fracao_sintetica)
 
@@ -485,7 +507,10 @@ tabela_A4_leak <-
     FPR
   )
 
-print(tabela_A4_leak |> select(-limiar))
+print(
+  tabela_A4_leak |>
+    select(-limiar)
+)
 
 # ==============================================================================
 # 7. COMPARAÇÃO TRIPLA: ARTIGO x SCRIPT 02 (honesto) x SCRIPT 03 (leakage)
@@ -507,6 +532,7 @@ pasta_saida <- file.path(
   here::here("outputs", "artefato", "leakage"),
   tipo_grid
 )
+
 dir.create(pasta_saida, recursive = TRUE, showWarnings = FALSE)
 
 # Caminhos dos artefatos baseados na estrutura padronizada dos scripts 01a e 01b
@@ -515,6 +541,7 @@ caminho_artefato_02 <- file.path(
   tipo_grid,
   paste0("sensibilidade_artigo", sufixo_saida, ".rds")
 )
+
 caminho_artefato_03 <- file.path(
   here::here("outputs", "artefato", "rf"),
   tipo_grid,
@@ -577,6 +604,72 @@ if (file.exists(caminho_artefato_02)) {
 
 print(comparacao_multipla, n = Inf)
 
+df_plot <-
+  comparacao_multipla |>
+  filter(origem != c("Script 01b — Random Forest (sensibilidade_artigo_rf)")) |>
+  mutate(
+    limiar = as.numeric(str_extract(Threshold, "\\d+")) / 100,
+    origem_rotulo = case_when(
+      str_detect(origem, "Artigo") ~ "(a) artigo base",
+      str_detect(origem, "honesto") ~ "(b) sem vazamento de dados",
+      str_detect(origem, "leakage") ~ "(c) com vazamento de dados"
+    ),
+    origem_rotulo = factor(
+      origem_rotulo,
+      levels = c(
+        "(a) artigo base",
+        "(b) sem vazamento de dados",
+        "(c) com vazamento de dados"
+      )
+    )
+  ) |>
+  pivot_longer(
+    cols = c(Precision, Recall),
+    names_to = "metric",
+    values_to = "value"
+  ) |>
+  mutate(
+    metric = if_else(metric == "Precision", "Precisão", "Recall")
+  )
+
+# 3. Construção do gráfico comparativo em 3 painéis
+grafico_comparativo <- ggplot(
+  df_plot,
+  aes(x = limiar, y = value, color = metric, group = metric)
+) +
+  geom_line(linewidth = 0.8) +
+  geom_point(size = 2) +
+  facet_wrap(~origem_rotulo, ncol = 3) +
+  scale_x_continuous(
+    breaks = seq(0, 0.7, by = 0.1),
+    labels = percent_format(accuracy = 1)
+  ) +
+  scale_y_continuous(
+    breaks = seq(0, 1.0, by = 0.1),
+    labels = percent_format(accuracy = 1),
+    limits = c(0, 1.0)
+  ) +
+  scale_color_manual(
+    values = c("Precisão" = "#d7191c", "Recall" = "#2b83ba")
+  ) +
+  theme_bw(base_size = 12, base_family = "serif") +
+  theme(
+    axis.title.x = element_text(size = 10, margin = margin(t = 6)),
+    axis.title.y = element_text(size = 10, margin = margin(r = 6)),
+    axis.text = element_text(size = 9, color = "black"),
+    legend.position = "bottom",
+    legend.title = element_blank(),
+    legend.text = element_text(size = 9),
+    legend.margin = margin(t = -5),
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(color = "gray92", linewidth = 0.3)
+  ) +
+  labs(
+    x = "Limiar de cobertura do rótulo",
+    y = "Desempenho Médio (100-fold CV)"
+  )
+
+print(grafico_comparativo)
 
 # ==============================================================================
 # 8. EXPORTAÇÃO
@@ -584,6 +677,7 @@ print(comparacao_multipla, n = Inf)
 dir.create(file.path(pasta_saida, "figures"), showWarnings = FALSE)
 
 artefato_leak <- list(
+  grafico_comparativo = grafico_comparativo,
   tabela_A4_leak = tabela_A4_leak,
   raw_100_folds_leak = resultados_folds_leak,
   prevalencia_por_limiar = prevalencia_por_limiar,
@@ -600,6 +694,9 @@ saveRDS(
   )
 )
 
+
+# TABELAS --------------------------------------------------------------------------
+# Salvar tabelas em formato aberto (CSV)
 readr::write_csv(
   tabela_A4_leak,
   file.path(
@@ -618,15 +715,47 @@ readr::write_csv(
   )
 )
 
+
+# FIGURAS --------------------------------------------------------------------------
 ggplot2::ggsave(
   filename = file.path(
     pasta_saida,
     "figures",
-    paste0("fracao_sintetica_por_limiar", sufixo_saida, ".pdf")
+    paste0("plot_fracao_sintetica", sufixo_saida, ".png")
   ),
   plot = plot_fracao_sintetica,
-  width = 10,
-  height = 7,
+  width = 20, # Largura exata de 1 coluna (86 mm) no modelo SBSR
+  height = 18, # Altura proporcional
+  units = "cm",
+  dpi = 300
+)
+
+
+ggplot2::ggsave(
+  filename = file.path(
+    pasta_saida,
+    "figures",
+    paste0("grafico_comparativo", sufixo_saida, ".png")
+  ),
+  plot = grafico_comparativo,
+  width = 20, # Largura exata de 1 coluna (86 mm) no modelo SBSR
+  height = 18, # Altura proporcional
+  units = "cm",
+  dpi = 300
+)
+
+
+# Salvar figuras em alta resolução (ex: PDF ou PNG para a revista)
+ggplot2::ggsave(
+  filename = file.path(
+    pasta_saida,
+    "figures",
+    paste0("fracao_sintetica_por_limiar", sufixo_saida, ".png")
+  ),
+  plot = plot_fracao_sintetica,
+  width = 20, # Largura exata de 1 coluna (86 mm) no modelo SBSR
+  height = 18, # Altura proporcional
+  units = "cm",
   dpi = 300
 )
 

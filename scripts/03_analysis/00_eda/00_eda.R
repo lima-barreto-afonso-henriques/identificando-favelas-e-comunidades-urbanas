@@ -44,7 +44,7 @@ pasta_saida <- here("data", "processed")
 # a resolução está fixada para rodar esse
 # script individualmente para cada resolução (9, 10 ou 11).
 # <- mude aqui (9, 10 ou 11) e rode de novo a cada vez
-resolucao_hex <- 11
+resolucao_hex <- 10
 
 arquivos_entrada <- c(
   "9" = "grid_hexagonal_res9.rds",

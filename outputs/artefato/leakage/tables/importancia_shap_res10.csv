@@ -1,0 +1,17 @@
+feature,shap_medio_abs
+households_connected_to_sewerage_system,0.04526380615355263
+households_with_sidewalk,0.045260561932170894
+households_with_trees,0.024053362387100367
+number_of_buildings,0.02218337670179583
+standard_deviation_of_building_area,0.019236390452466095
+households_solid_waste_collection,0.01576754805072253
+number_private_residences,0.015340917112871263
+avg_building_area,0.014512013555190351
+avg_slope_topodata,0.012816269482665323
+highway_intersection,0.009629331705532923
+households_connected_to_water_supply_network,0.004446698744157021
+waterway_intersection,0.001850903437832035
+railway_intersection,0.0014523604127180533
+natural_intersection,0.0012839251819544736
+power_intersection,5.970825627054939e-4
+aeroway_intersection,4.0022656595442704e-4

@@ -11,7 +11,6 @@ gc()
 # carrega funções e pacotes utilizados em todos os scripts do projeto
 source(here::here("scripts", "00_functions", "00_setup.R"))
 
-
 # caminhos padronizados de entrada/saída
 pasta_entrada <- here("data", "processed")
 pasta_saida <- here("outputs", "artefato")
@@ -28,7 +27,7 @@ if (!dir.exists(pasta_saida)) {
 # a resolução está fixada para rodar esse
 # script individualmente para cada resolução (9, 10 ou 11).
 # <- mude aqui (9, 10 ou 11) e rode de novo a cada vez
-resolucao_hex <- 9
+resolucao_hex <- 10
 
 # delimita os arquivos possíveis de serem utilizados
 arquivos_entrada <- c(
@@ -52,7 +51,6 @@ caminho_grid_hexagonal <- file.path(
 # leitura do arquivo
 grid_hexagonal <-
   readRDS(caminho_grid_hexagonal)
-
 
 # ==============================================================================
 # 2. PRÉ-PROCESSAMENTO (alinhado ao artigo)
@@ -572,42 +570,89 @@ tradeoff_df <-
   ) |>
   mutate(limiar_pct = paste0(round(limiar * 100), "%"))
 
-# Plotar o gráfico de linhas de Trade-off
-trade_off <-
-  ggplot(
-    tradeoff_df,
-    aes(x = limiar, y = mean_val, color = .metric)
+# Gráfico de Trade-off formatado para publicação científica (Padrão SBSR)
+trade_off <- ggplot(
+  tradeoff_df,
+  aes(x = limiar, y = mean_val, color = .metric)
+) +
+  # Linhas verticais de destaque (10% e 70%)
+  geom_vline(
+    xintercept = c(0.10, 0.70),
+    linetype = "dashed",
+    color = "gray40",
+    linewidth = 0.6
   ) +
-  geom_line(linewidth = 1.2) +
-  geom_point(size = 3) +
+
+  # Séries de dados (Linhas e Pontos)
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2.5) +
+
+  # Anotações textuais dos limiares destacados
+  annotate(
+    "text",
+    x = 0.10,
+    y = 0.95,
+    label = "10% (J de Youden)",
+    angle = 90,
+    vjust = -0.5,
+    hjust = 1,
+    size = 4.5,
+    family = "serif",
+    fontface = "italic",
+    color = "gray20"
+  ) +
+  annotate(
+    "text",
+    x = 0.70,
+    y = 0.95,
+    label = "70% (Artigo)",
+    angle = 90,
+    vjust = -0.5,
+    hjust = 1,
+    size = 4.5,
+    family = "serif",
+    fontface = "italic",
+    color = "gray20"
+  ) +
+
+  # Escalas dos eixos
   scale_x_continuous(
     breaks = seq(0.1, 0.9, by = 0.1),
-    labels = scales::percent
+    labels = percent_format(accuracy = 1),
+    limits = c(0.08, 0.92)
   ) +
-  scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
+  scale_y_continuous(
+    breaks = seq(0, 1, by = 0.10),
+    labels = percent_format(accuracy = 1),
+    limits = c(0, 1)
+  ) +
+  # Cores com contraste acessível
   scale_color_manual(
     values = c("recall" = "#2b83ba", "precision" = "#d7191c"),
     labels = c("precision" = "Precisão", "recall" = "Recall")
   ) +
-  theme_minimal() +
+  # Tema visual acadêmico (Times New Roman / Serif)
+  theme_bw(base_size = 14, base_family = "serif") +
   theme(
-    axis.text.x = element_text(size = 16, angle = 0, hjust = 0.5),
-    axis.text.y = element_text(size = 16),
-    axis.title = element_blank(),
+    axis.title.x = element_text(size = 14, margin = margin(t = 6)),
+    axis.title.y = element_text(size = 14, margin = margin(r = 6)),
+    axis.text = element_text(size = 14, color = "black"),
     legend.position = "bottom",
-    legend.text = element_text(size = 16),
     legend.title = element_blank(),
-    panel.grid = element_blank(),
-    plot.title = element_text(size = 16, face = "bold", hjust = 0.5)
+    legend.text = element_text(size = 14),
+    legend.margin = margin(t = -5),
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(color = "gray92", linewidth = 0.3)
   ) +
-  labs(
-    title = "Trade-off entre Precisão e Recall por Limiar de Decisão",
-    x = "Limiar de Decisão",
-    y = "Desempenho Média (100-fold CV)",
-    color = "Métrica"
-  )
-print(trade_off)
 
+  # Rótulos dos eixos
+  labs(
+    x = "Limiar de cobertura do rótulo",
+    y = "Desempenho Médio (100-fold CV)"
+  )
+
+# Exibir o gráfico
+print(trade_off)
 
 # ==============================================================================
 # 9. EXPORTAÇÃO DOS ARTEFATOS
@@ -639,6 +684,8 @@ saveRDS(
 dir.create(file.path(pasta_saida, "tables"), showWarnings = FALSE)
 dir.create(file.path(pasta_saida, "figures"), showWarnings = FALSE)
 
+
+# TABELAS --------------------------------------------------------------------------
 # Salvar tabelas em formato aberto (CSV)
 readr::write_csv(
   tabela_A4,
@@ -663,16 +710,33 @@ readr::write_csv(
   )
 )
 
+
+# FIGURAS --------------------------------------------------------------------------
 # Salvar figuras em alta resolução (ex: PDF ou PNG para a revista)
 ggplot2::ggsave(
   filename = file.path(
     pasta_saida,
     "figures",
-    paste0("figura_A12", sufixo_saida, ".pdf")
+    paste0("figura_A12", sufixo_saida, ".png")
   ),
   plot = plot_fig_A12,
-  width = 14,
-  height = 10,
+  width = 20, # Largura exata de 1 coluna (86 mm) no modelo SBSR
+  height = 18, # Altura proporcional
+  units = "cm",
+  dpi = 300
+)
+
+# Salvar figuras em alta resolução (ex: PDF ou PNG para a revista)
+ggplot2::ggsave(
+  filename = file.path(
+    pasta_saida,
+    "figures",
+    paste0("figura_trade_off_limiares", sufixo_saida, ".png")
+  ),
+  plot = trade_off,
+  width = 20, # Largura exata de 1 coluna (86 mm) no modelo SBSR
+  height = 18, # Altura proporcional
+  units = "cm",
   dpi = 300
 )
 

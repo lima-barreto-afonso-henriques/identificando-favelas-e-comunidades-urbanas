@@ -3,7 +3,7 @@
 # Versão: RANDOM FOREST (modelo final do artigo) — SMOTENC SEM leakage
 # ==============================================================================
 # DIDÁTICA:
-# Esta é uma variação do 02_article_sensibility_analysis.R trocando apenas o
+# Esta é uma variação do 01a_article_sensibility_analysis_dt.R trocando apenas o
 # algoritmo: Decision Tree -> Random Forest, que é o modelo que o artigo
 # efetivamente usa na Seção 4.2 ("The Random Forest algorithm was selected
 # as the final model"). O Apêndice A (Tabela A.4) descreve a sensibilidade
@@ -17,7 +17,7 @@
 # a ruído que uma única árvore), já reduz a diferença que você observou
 # em relação à Tabela A.4, SEM precisar recorrer à hipótese de leakage.
 #
-# O pipeline de pré-processamento, folds e métricas é IDÊNTICO ao script 02
+# O pipeline de pré-processamento, folds e métricas é IDÊNTICO ao script 01a
 # (mesma seed, mesmos 100 folds, mesma recipe, SMOTENC aplicado apenas
 # dentro de cada fold de TREINO — comportamento correto e sem leakage).
 # ==============================================================================
@@ -43,15 +43,12 @@ if (!dir.exists(pasta_saida)) {
 # a resolução está fixada para rodar esse
 # script individualmente para cada resolução (9, 10 ou 11).
 # <- mude aqui (9, 10 ou 11) e rode de novo a cada vez
-resolucao_hex <- 10
-
-arquivos_entrada <- c(
-  "9" = "grid_hexagonal_res9.rds",
-  "10" = "grid_hexagonal_artigo.rds",
-  "11" = "grid_hexagonal_res11.rds"
-)
+resolucao_hex <- 11
 
 # GRID HEXAGONAL -------------------------------------------------------------------
+# CORRIGIDO: removido o mapa 'arquivos_entrada' com nomes obsoletos
+# (grid_hexagonal_res9.rds / _artigo.rds / _res11.rds) — era código morto,
+# nunca referenciado; a leitura real já usa 'tipo_grid' + sufixo abaixo.
 sufixo_saida <- paste0("_res", resolucao_hex)
 
 # opçoes: area_pura ou ponderado_edificações
@@ -67,7 +64,7 @@ grid_hexagonal <-
   readRDS(caminho_grid_hexagonal)
 
 # ==============================================================================
-# 2. PRÉ-PROCESSAMENTO (idêntico ao script 02)
+# 2. PRÉ-PROCESSAMENTO (idêntico ao script 01a)
 # ==============================================================================
 grid_hexagonal <-
   grid_hexagonal |>
@@ -147,9 +144,22 @@ skimr::skim(grid_df)
 
 options(parallelly.makeNodePSOCK.setup_strategy = "sequential")
 
-# Agora que cada worker recebe só uma cópia de grid_df (~50 MB) por
-# limiar (não 100 cópias), pode voltar a usar até 6 workers com folga.
-n_workers <- max(1, min(6, parallelly::availableCores() - 1))
+# Garante que o furrr esteja disponível (necessário para paralelizar de
+# fato o loop dos 7 limiares — ver Seção 6 abaixo).
+if (!requireNamespace("furrr", quietly = TRUE)) {
+  install.packages("furrr")
+}
+
+# CORRIGIDO: Random Forest (500 árvores x 100 folds sequenciais por
+# worker) é muito mais pesado em RAM do que Decision Tree (script 01a).
+# Com importance = "impurity" cada ranger::ranger() treinado guarda a
+# importância de todas as 500 árvores; multiplicando por 100 folds e por
+# N workers rodando ao mesmo tempo, é fácil estourar a RAM física da
+# máquina — o worker é morto pelo SO, o que aparece como "Future ...
+# interrupted", não como erro de future.globals.maxSize. Reduzido o
+# teto de workers para 3 (metade do que o 01a usa) especificamente aqui,
+# por causa do custo extra do RF.
+n_workers <- max(1, min(3, parallelly::availableCores() - 1))
 
 # O payload por worker agora é pequeno (um data.frame de ~50 MB por vez),
 # então o limite pode voltar a um valor bem mais conservador — ele deixa
@@ -178,17 +188,26 @@ tryCatch(
 # valores default do ranger (mtry = sqrt(p), min_n = 1 para classificação)
 # como ponto de partida honesto e documentado — não uma tentativa de
 # reproduzir hiperparâmetros que o artigo não publicou.
+#
+# CORRIGIDO: importance = "impurity" removido daqui. Esta é a etapa de
+# SENSIBILIDADE (700 modelos: 100 folds x 7 limiares) — ninguém consome
+# a importância de variável desses modelos descartáveis, só as métricas
+# de collect_metrics(). Guardar importance = "impurity" em cada um dos
+# 700 ranger::ranger() infla bastante o objeto retornado por fold, sendo
+# uma causa provável do worker estourar RAM e morrer ("interrupted").
+# A importância de variável (SHAP/impurity) já é calculada só uma vez,
+# no modelo final (modelo_artigo.R), onde de fato é usada — manter aqui
+# também seria redundante e caro.
 rf_spec <-
   rand_forest(trees = 500) |>
   set_engine(
     "ranger",
-    importance = "impurity",
     seed = 42
   ) |>
   set_mode("classification")
 
 # ==============================================================================
-# 5. FUNÇÃO DE AVALIAÇÃO MODULAR (idêntica em estrutura ao script 02)
+# 5. FUNÇÃO DE AVALIAÇÃO MODULAR (idêntica em estrutura ao script 01a)
 # ==============================================================================
 avaliar_limiar <- function(limiar, data, model_spec) {
   df_model <-
@@ -239,7 +258,14 @@ avaliar_limiar <- function(limiar, data, model_spec) {
         yardstick::roc_auc,
         yardstick::f_meas
       ),
-      control = control_resamples(save_pred = FALSE)
+      # CORRIGIDO: allow_par = FALSE força os 100 folds a rodarem
+      # sequencialmente dentro do worker, como o comentário da Seção 3
+      # já descrevia como intenção. Sem isso, o tune::fit_resamples()
+      # detecta o future::plan(multisession) global e tenta paralelizar
+      # os 100 folds internamente, exportando ~4.37 GiB de globals por
+      # fold (o dataset completo replicado por fold) — foi isso que
+      # estourou o limite de future.globals.maxSize.
+      control = control_resamples(save_pred = FALSE, allow_par = FALSE)
     )
 
   collect_metrics(
@@ -267,14 +293,34 @@ distribuicao_limiares <- purrr::map_dfr(limiares_teste, function(l) {
 
 print(distribuicao_limiares)
 
-resultados_folds_rf <- purrr::map_dfr(
-  limiares_teste,
-  ~ avaliar_limiar(
-    limiar = .x,
-    data = grid_df,
-    model_spec = rf_spec
+# CORRIGIDO: antes era purrr::map_dfr (sequencial), então o
+# future::plan(multisession) configurado acima nunca era usado no nível
+# pretendido pelos comentários (paralelizar os limiares, não os folds).
+# Com allow_par = FALSE dentro de avaliar_limiar(), agora é o
+# furrr::future_map_dfr abaixo que efetivamente distribui os 7 limiares
+# entre os workers, cada um rodando seus 100 folds sequencialmente.
+#
+# CORRIGIDO: adicionados progressr (para saber em qual limiar a rodada
+# está, já que cada um pode levar bastante tempo) e .progress = TRUE.
+# Se um worker morrer de novo (RAM/interrupted), você saberá qual
+# limiar estava em andamento em vez de descobrir só no fim.
+if (!requireNamespace("progressr", quietly = TRUE)) {
+  install.packages("progressr")
+}
+progressr::handlers(global = TRUE)
+
+resultados_folds_rf <- progressr::with_progress({
+  furrr::future_map_dfr(
+    limiares_teste,
+    ~ avaliar_limiar(
+      limiar = .x,
+      data = grid_df,
+      model_spec = rf_spec
+    ),
+    .options = furrr::furrr_options(seed = TRUE),
+    .progress = TRUE
   )
-)
+})
 
 # desliga o processamento paralelo ao fim das operações
 future::plan(sequential)
@@ -299,7 +345,7 @@ print(tabela_final)
 
 #
 # ==============================================================================
-# 6. RECONSTRUÇÃO DA TABELA A.4 (versão Random Forest)
+# 6b. RECONSTRUÇÃO DA TABELA A.4 (versão Random Forest)
 # ==============================================================================
 # médias das métricas por limiar
 tabela_A4 <-
@@ -422,14 +468,14 @@ plot_fig_A12 <- ggplot(
   ) +
   labs(
     title = "Mann-Whitney Test P-values Matrix (Lower Triangle)",
-    subtitle = "Decision Tree | 100-fold CV | Recall Distributions"
+    subtitle = "Random Forest | 100-fold CV | Recall Distributions"
   )
 
 print(plot_fig_A12)
 
 
 # ==============================================================================
-# 8. COMPARAÇÃO DIRETA: DECISION TREE (script 02) x RANDOM FOREST (este script)
+# 8. COMPARAÇÃO DIRETA: DECISION TREE (script 01a) x RANDOM FOREST (este script)
 # ==============================================================================
 # O artigo escolhe 70% citando "the best trade-off, achieving a recall of 92%
 # and a false positive rate of 1.18%" — ou seja, o critério declarado não é
@@ -438,8 +484,8 @@ print(plot_fig_A12)
 # (J = Sensibilidade + Especificidade - 1 = Recall - FPR), que soma 1 se o
 # classificador for perfeito e 0 se for equivalente a chute aleatório.
 
-# DIDÁTICA: se você já tem 'tabela_A4' salva do script 02 no ambiente (ou
-# recarregada do .rds em outputs/artefato/<tipo_grid>/sensibilidade_artigo_resXX.rds),
+# DIDÁTICA: se você já tem 'tabela_A4' salva do script 01a no ambiente (ou
+# recarregada do .rds em outputs/artefato/dt/<tipo_grid>/sensibilidade_artigo_resXX.rds),
 # este bloco junta as duas para comparação lado a lado no limiar de 70%.
 tabela_A4 <-
   tabela_A4 |>
@@ -538,40 +584,90 @@ tradeoff_df <-
   ) |>
   mutate(limiar_pct = paste0(round(limiar * 100), "%"))
 
-# Plotar o gráfico de linhas de Trade-off
-trade_off <-
-  ggplot(
-    tradeoff_df,
-    aes(x = limiar, y = mean_val, color = .metric)
+# Gráfico de Trade-off formatado para publicação científica (Padrão SBSR)
+trade_off <- ggplot(
+  tradeoff_df,
+  aes(x = limiar, y = mean_val, color = .metric)
+) +
+  # Linhas verticais de destaque (10% e 70%)
+  geom_vline(
+    xintercept = c(0.10, 0.70),
+    linetype = "dashed",
+    color = "gray40",
+    linewidth = 0.6
   ) +
-  geom_line(linewidth = 1.2) +
-  geom_point(size = 3) +
+
+  # Séries de dados (Linhas e Pontos)
+  geom_line(linewidth = 0.9) +
+  geom_point(size = 2.5) +
+
+  # Anotações textuais dos limiares destacados
+  annotate(
+    "text",
+    x = 0.10,
+    y = 0.95,
+    label = "10% (J de Youden)",
+    angle = 90,
+    vjust = -0.5,
+    hjust = 1,
+    size = 3.2,
+    family = "serif",
+    fontface = "italic",
+    color = "gray20"
+  ) +
+  annotate(
+    "text",
+    x = 0.70,
+    y = 0.95,
+    label = "70% (Artigo)",
+    angle = 90,
+    vjust = -0.5,
+    hjust = 1,
+    size = 3.2,
+    family = "serif",
+    fontface = "italic",
+    color = "gray20"
+  ) +
+
+  # Escalas dos eixos
   scale_x_continuous(
     breaks = seq(0.1, 0.9, by = 0.1),
-    labels = scales::percent
+    labels = percent_format(accuracy = 1),
+    limits = c(0.08, 0.92)
   ) +
-  scale_y_continuous(labels = scales::percent, limits = c(0, 1)) +
+  scale_y_continuous(
+    breaks = seq(0, 1, by = 0.25),
+    labels = percent_format(accuracy = 1),
+    limits = c(0, 1)
+  ) +
+
+  # Cores com contraste acessível
   scale_color_manual(
     values = c("recall" = "#2b83ba", "precision" = "#d7191c"),
     labels = c("precision" = "Precisão", "recall" = "Recall")
   ) +
-  theme_minimal() +
+
+  # Tema visual acadêmico (Times New Roman / Serif)
+  theme_bw(base_size = 10, base_family = "serif") +
   theme(
-    axis.text.x = element_text(size = 16, angle = 0, hjust = 0.5),
-    axis.text.y = element_text(size = 16),
-    axis.title = element_blank(),
+    axis.title.x = element_text(size = 10, margin = margin(t = 6)),
+    axis.title.y = element_text(size = 10, margin = margin(r = 6)),
+    axis.text = element_text(size = 9, color = "black"),
     legend.position = "bottom",
-    legend.text = element_text(size = 16),
     legend.title = element_blank(),
-    panel.grid = element_blank(),
-    plot.title = element_text(size = 16, face = "bold", hjust = 0.5)
+    legend.text = element_text(size = 9),
+    legend.margin = margin(t = -5),
+    panel.grid.minor = element_blank(),
+    panel.grid.major = element_line(color = "gray92", linewidth = 0.3)
   ) +
+
+  # Rótulos dos eixos
   labs(
-    title = "Trade-off entre Precisão e Recall por Limiar de Decisão",
-    x = "Limiar de Decisão",
-    y = "Desempenho Média (100-fold CV)",
-    color = "Métrica"
+    x = "Limiar de cobertura do rótulo",
+    y = "Desempenho Médio (100-fold CV)"
   )
+
+# Exibir o gráfico
 print(trade_off)
 
 
@@ -608,6 +704,8 @@ saveRDS(
 dir.create(file.path(pasta_saida, "tables"), showWarnings = FALSE)
 dir.create(file.path(pasta_saida, "figures"), showWarnings = FALSE)
 
+
+# TABELAS --------------------------------------------------------------------------
 # Salvar tabelas em formato aberto (CSV)
 readr::write_csv(
   tabela_A4,
@@ -632,17 +730,33 @@ readr::write_csv(
   )
 )
 
+
+# FIGURAS --------------------------------------------------------------------------
 # Salvar figuras em alta resolução (ex: PDF ou PNG para a revista)
 ggplot2::ggsave(
   filename = file.path(
     pasta_saida,
     "figures",
-    paste0("figura_A12_rf", sufixo_saida, ".pdf")
+    paste0("figura_A12_rf", sufixo_saida, ".png")
   ),
   plot = plot_fig_A12,
-  width = 14,
-  height = 10,
+  width = 20, # Largura exata de 1 coluna (86 mm) no modelo SBSR
+  height = 18, # Altura proporcional
+  units = "cm",
   dpi = 300
 )
 
+# Salvar figuras em alta resolução (ex: PDF ou PNG para a revista)
+ggplot2::ggsave(
+  filename = file.path(
+    pasta_saida,
+    "figures",
+    paste0("figura_trade_off_limiares_rf", sufixo_saida, ".png")
+  ),
+  plot = trade_off,
+  width = 10, # Largura exata de 1 coluna (86 mm) no modelo SBSR
+  height = 8, # Altura proporcional
+  units = "cm",
+  dpi = 300
+)
 # FIM ==========================================================================
