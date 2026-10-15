@@ -35,10 +35,6 @@ editor: visual
 
 ### Produto 1 — Diagnóstico do Marco Jurídico e Legal
 
-**Consultoria Especializada**
-
-Termo de Referência nº 14/2025 — FNP
-
 ::: {.notes}
 Slide de abertura. Apresentar escopo e produto.
 :::
