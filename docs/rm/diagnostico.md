@@ -41,7 +41,7 @@ Slide de abertura. Apresentar escopo e produto.
 
 ---
 
-## A Tese Central
+## A Tese Central 
 
 **O Brasil tem conceito. Falta mecanismo.**
 
@@ -186,28 +186,28 @@ Contraste entre o número formal e o funcional.
 
 ## Lacunas — Detalhamento
 
-**1. Financiamento**
-> *"O PDUI é um natimorto, porque nasce sem o braço do fundo"* — Klink
+**1. Financiamento**:
+*"O PDUI é um natimorto, porque nasce sem o braço do fundo"* — Klink
 
-**2. Metropolização institucional**
-> *"A RM morreu, e é preciso recomeçar tudo de novo"* — Francisconi
+**2. Metropolização institucional**:
+*"A RM morreu, e é preciso recomeçar tudo de novo"* — Francisconi
 
-**3. Desequilíbrio federativo**
-> *"O primeiro desmonte não foi financeiro, foi político"* — Francisconi
+**3. Desequilíbrio federativo**:
+*"O primeiro desmonte não foi financeiro, foi político"* — Francisconi
 
-**4. Fragmentação institucional**
+**4. Fragmentação institucional**:
 RMs, consórcios e comitês de bacia se sobrepõem sem coincidir.
 
-**5. Participação social**
-> *"Quem preenche o vácuo é o setor privado"* — Klink
+**5. Participação social**:
+*"Quem preenche o vácuo é o setor privado"* — Klink
 
-**6. Responsabilização**
+**6. Responsabilização**:
 ADI 1.842 setorial; embargos pendentes há mais de uma década.
 
-**7. Clima**
+**7. Clima**:
 Nenhum marco incorpora critério climático.
 
-**8. PNOT**
+**8. PNOT**:
 Compatibilização exigida (art. 5º, §2º) depende de GT (prazo 2027).
 
 ---
