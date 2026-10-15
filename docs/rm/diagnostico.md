@@ -7,7 +7,7 @@ date-format: "DD/MM/YYYY"
 lang: pt
 format:
   revealjs:
-    #theme: [default, custom.scss]
+    theme: [default, custom.scss]
     slide-number: true
     progress: true
     history: true
@@ -163,10 +163,10 @@ Contraste entre o número formal e o funcional.
 | Tensão | Descrição |
 |---|---|
 | **Hierarquia** | PNDU coordena sem alterar o Estatuto da Metrópole |
-| **Instrumentos** | EM procedimental; PNDU principiológica |
+| **Instrumentos** | Estatuto da Metrópole (procedimentos) e o PNDU (princípios) |
 | **Financiamento** | Nenhum assegura fonte vinculada |
-| **Tipologia** | EM trata tudo igual; PNDU diferencia, mas não conecta |
-| **Responsabilização** | EM tem (enfraquecido); PNDU não prevê |
+| **Tipologia** | Estatuto da Metrópole trata tudo igual e a PNDU diferencia, mas não articula |
+| **Responsabilização** | Estatuto da Metrópole (removida) e o PNDU não prevê |
 
 
 ---
@@ -184,7 +184,7 @@ Contraste entre o número formal e o funcional.
 
 ---
 
-## Lacunas 1 a 4 — Detalhe
+## Lacunas — Detalhamento
 
 **1. Financiamento**
 > *"O PDUI é um natimorto, porque nasce sem o braço do fundo"* — Klink
@@ -197,10 +197,6 @@ Contraste entre o número formal e o funcional.
 
 **4. Fragmentação institucional**
 RMs, consórcios e comitês de bacia se sobrepõem sem coincidir.
-
----
-
-## Lacunas 5 a 8 — Detalhe
 
 **5. Participação social**
 > *"Quem preenche o vácuo é o setor privado"* — Klink
