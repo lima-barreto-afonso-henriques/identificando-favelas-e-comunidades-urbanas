@@ -1,0 +1,71 @@
+/*-- scss:defaults --*/
+
+$body-bg: #ffffff;
+$body-color: #1a1a2e;
+$link-color: #2c3e50;
+$presentation-heading-color: #2c3e50;
+$presentation-heading-font-weight: 700;
+$presentation-heading-text-transform: none;
+$presentation-font-size-root: 28px;
+$presentation-h1-font-size: 1.8em;
+$presentation-h2-font-size: 1.5em;
+$presentation-h3-font-size: 1.1em;
+$code-block-bg: #f5f5f5;
+$table-border-color: #cccccc;
+
+/*-- scss:rules --*/
+
+.reveal .slides section {
+  text-align: left;
+}
+
+.reveal h1, .reveal h2, .reveal h3 {
+  color: #2c3e50;
+  text-transform: none;
+  border-bottom: 2px solid #2c3e50;
+  padding-bottom: 0.2em;
+  margin-bottom: 0.6em;
+}
+
+.reveal .title-slide h1 {
+  border-bottom: none;
+  font-size: 2.2em;
+  color: #2c3e50;
+}
+
+.reveal .title-slide h3 {
+  border-bottom: none;
+  color: #555;
+  font-weight: 400;
+}
+
+.reveal blockquote {
+  border-left: 4px solid #2c3e50;
+  padding-left: 1em;
+  font-style: italic;
+  color: #444;
+  background: #f9f9f9;
+}
+
+.reveal table {
+  font-size: 0.75em;
+}
+
+.reveal table th {
+  background-color: #2c3e50;
+  color: white;
+}
+
+.reveal table td, .reveal table th {
+  padding: 0.4em 0.6em;
+}
+
+.reveal .footer {
+  font-size: 0.45em;
+  color: #888;
+}
+
+.reveal .slide-number {
+  font-size: 0.5em;
+  color: #888;
+}
