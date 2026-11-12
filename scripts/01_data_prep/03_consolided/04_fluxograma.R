@@ -1,17 +1,15 @@
 # ============================================================
 # EXPORTAR DIAGRAMA grViz EM ALTA RESOLUÇÃO SEM DISTORÇÃO
 # ============================================================
-# install.packages(c("DiagrammeR", "DiagrammeRsvg", "rsvg"))
 
-library(DiagrammeR)
-library(DiagrammeRsvg)
-library(rsvg)
+# carrega funções e pacotes utilizados em todos os scripts do projeto
+source(here::here("scripts", "00_functions", "00_setup.R"))
 
 # ------------------------------------------------------------
 # 1. DIAGRAMA
 # ------------------------------------------------------------
 gr <- grViz(
-  "
+      "
 digraph flowchart {
 
   graph [layout = dot, rankdir = TB,
@@ -166,8 +164,8 @@ h_pt <- as.numeric(sub('.*height="([0-9.]+)pt".*', '\\1', svg_code))
 
 # Se a extração falhar, usa fallback
 if (is.na(w_pt) || is.na(h_pt) || w_pt == 0) {
-  w_pt <- 1000
-  h_pt <- 1400
+      w_pt <- 1000
+      h_pt <- 1400
 }
 
 razao <- h_pt / w_pt # altura / largura
@@ -181,22 +179,22 @@ dpi <- 600 # <<< 300 (web) ou 600 (impressão)
 altura_cm <- largura_cm * razao # altura calculada SEM distorção
 
 cat(sprintf(
-  "Saída: %.1f cm x %.1f cm @ %d dpi = %d x %d px\n",
-  largura_cm,
-  altura_cm,
-  dpi,
-  round(largura_cm / 2.54 * dpi),
-  round(altura_cm / 2.54 * dpi)
+      "Saída: %.1f cm x %.1f cm @ %d dpi = %d x %d px\n",
+      largura_cm,
+      altura_cm,
+      dpi,
+      round(largura_cm / 2.54 * dpi),
+      round(altura_cm / 2.54 * dpi)
 ))
 
 # ------------------------------------------------------------
 # 5. EXPORTAR PNG (sem distorção)
 # ------------------------------------------------------------
 rsvg_png(
-  charToRaw(svg_code),
-  file = "figura_fluxograma.png",
-  width = round(largura_cm / 2.54 * dpi),
-  height = round(altura_cm / 2.54 * dpi)
+      charToRaw(svg_code),
+      file = "figura_fluxograma.png",
+      width = round(largura_cm / 2.54 * dpi),
+      height = round(altura_cm / 2.54 * dpi)
 )
 
 # ------------------------------------------------------------

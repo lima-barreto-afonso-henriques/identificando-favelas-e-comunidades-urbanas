@@ -43,5 +43,8 @@ pacman::p_load(
   shapviz, # visualização de SHAP (beeswarm/bar) compatível com fastshap
   duckdb,
   DBI,
-  furrr
+  furrr,
+  DiagrammeR,
+  DiagrammeRsvg,
+  rsvg
 )

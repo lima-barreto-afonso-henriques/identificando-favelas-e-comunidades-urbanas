@@ -1,7 +1,12 @@
-library(DiagrammeR)
+# ============================================================
+# EXPORTAR DIAGRAMA grViz EM ALTA RESOLUÇÃO SEM DISTORÇÃO
+# ============================================================
+
+# carrega funções e pacotes utilizados em todos os scripts do projeto
+source(here::here("scripts", "00_functions", "00_setup.R"))
 
 grViz(
-  "
+      "
 digraph flowchart {
 
   // ----------------------------------------------------
@@ -17,8 +22,8 @@ digraph flowchart {
   // ----------------------------------------------------
   // FONTES MANTIDAS EM 55
   // ----------------------------------------------------
-  node [fontname = 'Helvetica', fontsize = 105, margin = '0.7,0.5']
-  edge [fontname = 'Helvetica', fontsize = 105, penwidth = 6.0,
+  node [fontname = 'Helvetica', fontsize = 125, margin = '0.7,0.5']
+  edge [fontname = 'Helvetica', fontsize = 125, penwidth = 6.0,
         arrowsize = 5.0, color = '#000000']
 
   // ====================================================
@@ -27,12 +32,12 @@ digraph flowchart {
   subgraph cluster_unit {
     label = 'Unidade de Análise'
     style = filled; fillcolor = '#FADCD9'; color = '#D9534F'
-    penwidth = 4; fontname = 'Helvetica-Bold'; fontsize = 105; margin = 60
+    penwidth = 4; fontname = 'Helvetica-Bold'; fontsize = 125; margin = 60
 
     node [shape = parallelogram, style = filled, fillcolor = '#FFFFFF',
-          color = '#333333', width = 20.0, fontsize = 105]
+          color = '#333333', width = 20.0, fontsize = 125]
 
-    h3 [label = 'Grades Hexagonais H3', group = 'center', fontsize = 105]
+    h3 [label = 'Grades Hexagonais H3', group = 'center', fontsize = 125]
   }
 
   node [shape = box, style = filled, fillcolor = '#C9DAF8',
@@ -45,18 +50,18 @@ digraph flowchart {
   subgraph cluster_input {
     label = 'Dados de Entrada'
     style = filled; fillcolor = '#FADCD9'; color = '#D9534F'
-    penwidth = 4; fontname = 'Helvetica-Bold'; fontsize = 75; margin = 60
+    penwidth = 4; fontname = 'Helvetica-Bold'; fontsize = 125; margin = 60
 
     node [shape = parallelogram, style = filled, fillcolor = '#FFFFFF',
           color = '#333333', width = 20]
 
-    cnefe    [label = 'Pontos CNEFE',                  group = 'col1', fontsize = 105]
-    census   [label = 'Setores Censitários',           group = 'col1', fontsize = 105]
-    building [label = 'Polígonos de\\nEdificações',    group = 'col1', fontsize = 105]
-    slum     [label = 'Polígonos de Favelas',          group = 'col1', fontsize = 105]
-    osm      [label = 'Linhas Vetoriais (OSM)',        group = 'col1', fontsize = 105]
-    dsm      [label = 'MDS', width = 5.0,              group = 'col1', fontsize = 105]
-    slope    [label = 'Declividade', width = 5.0,      group = 'col1', fontsize = 105]
+    cnefe    [label = 'Pontos CNEFE',                  group = 'col1', fontsize = 125]
+    census   [label = 'Setores Censitários',           group = 'col1', fontsize = 125]
+    building [label = 'Polígonos de\\nEdificações',    group = 'col1', fontsize = 125]
+    slum     [label = 'Polígonos de Favelas',          group = 'col1', fontsize = 125]
+    osm      [label = 'Linhas Vetoriais (OSM)',        group = 'col1', fontsize = 125]
+    dsm      [label = 'MDS', width = 5.0,              group = 'col1', fontsize = 125]
+    slope    [label = 'Declividade', width = 5.0,      group = 'col1', fontsize = 125]
   }
 
   // ====================================================
@@ -65,17 +70,17 @@ digraph flowchart {
   subgraph cluster_preprocessing {
     label = 'Pré-processamento'
     style = filled; fillcolor = '#FADCD9'; color = '#D9534F'
-    penwidth = 4; fontname = 'Helvetica-Bold'; fontsize = 105; margin = 60
+    penwidth = 4; fontname = 'Helvetica-Bold'; fontsize = 125; margin = 60
 
     node [shape = box, style = filled, fillcolor = '#C9DAF8',
           color = '#4A86E8', fontname = 'Helvetica', width = 20.0]
 
-    dasymetric [label = 'Mapeamento\\nDasimétrico',                       group = 'col2', fontsize = 105]
-    density    [label = 'Densidade de Área',                              group = 'col2', fontsize = 105]
-    poly_count [label = 'Contagem, média e desvio\\npadrão de polígonos', group = 'col2', fontsize = 105]
-    occupies   [label = 'Se ocupa 70%\\nda área',                         group = 'col2', fontsize = 105]
-    buffer     [label = 'Buffer de 100m',                                 group = 'col2', fontsize = 105]
-    zonal      [label = 'Estatística Zonal\\n(Média)',                    group = 'col2', fontsize = 105]
+    dasymetric [label = 'Mapeamento\\nDasimétrico',                       group = 'col2', fontsize = 125]
+    density    [label = 'Densidade de Área',                              group = 'col2', fontsize = 125]
+    poly_count [label = 'Contagem, média e desvio\\npadrão de polígonos', group = 'col2', fontsize = 125]
+    occupies   [label = 'Se ocupa 70%\\nda área',                         group = 'col2', fontsize = 125]
+    buffer     [label = 'Buffer de 100m',                                 group = 'col2', fontsize = 125]
+    zonal      [label = 'Estatística Zonal\\n(Média)',                    group = 'col2', fontsize = 125]
   }
 
   // ====================================================
@@ -91,7 +96,7 @@ digraph flowchart {
   // ====================================================
   node [shape = box, style = filled, fillcolor = '#FADCD9',
         color = '#D9534F', fontname = 'Helvetica-Bold', width = 12.0]
-  desc_analysis [label = 'Análise Descritiva', group = 'col3', fontsize = 105]
+  desc_analysis [label = 'Análise Descritiva', group = 'col3', fontsize = 125]
 
   // ====================================================
   // 6. AVALIAÇÃO DA CLASSIFICAÇÃO (Coluna 4 - Topo)
@@ -99,12 +104,12 @@ digraph flowchart {
   subgraph cluster_evaluation {
     label = 'Avaliação da\\nClassificação'
     style = filled; fillcolor = '#FADCD9'; color = '#D9534F'
-    penwidth = 4; fontname = 'Helvetica-Bold'; fontsize = 105; margin = 60
+    penwidth = 4; fontname = 'Helvetica-Bold'; fontsize = 125; margin = 60
 
     node [shape = box, style = filled, fillcolor = '#FFFFFF',
           color = '#333333', fontname = 'Helvetica', width = 20.0]
 
-    qual_quant [label = 'Qualitativa e\\nQuantitativa', group = 'col4', fontsize = 105]
+    qual_quant [label = 'Qualitativa e\\nQuantitativa', group = 'col4', fontsize = 125]
   }
 
   // ====================================================
@@ -113,14 +118,14 @@ digraph flowchart {
   subgraph cluster_classification {
     label = 'Classificação'
     style = filled; fillcolor = '#FADCD9'; color = '#D9534F'
-    penwidth = 4; fontname = 'Helvetica-Bold'; fontsize = 105; margin = 50
+    penwidth = 4; fontname = 'Helvetica-Bold'; fontsize = 125; margin = 50
 
     node [shape = box, style = filled, fillcolor = '#FFFFFF',
           color = '#333333', fontname = 'Helvetica', width = 20.0]
 
-    model_sel   [label = 'Seleção do\\nModelo',     group = 'col3', fontsize = 105]
-    model_run   [label = 'Execução do\\nModelo',    group = 'col3', fontsize = 105]
-    feat_impact [label = 'Impacto das\\nVariáveis', group = 'col3', fontsize = 105]
+    model_sel   [label = 'Seleção do\\nModelo',     group = 'col3', fontsize = 125]
+    model_run   [label = 'Execução do\\nModelo',    group = 'col3', fontsize = 125]
+    feat_impact [label = 'Impacto das\\nVariáveis', group = 'col3', fontsize = 125]
   }
 
   // ====================================================
@@ -129,13 +134,13 @@ digraph flowchart {
   subgraph cluster_results {
     label = 'Análise de\\nResultados'
     style = filled; fillcolor = '#FADCD9'; color = '#D9534F'
-    penwidth = 4; fontname = 'Helvetica-Bold'; fontsize = 105; margin = 50
+    penwidth = 4; fontname = 'Helvetica-Bold'; fontsize = 125; margin = 50
 
     node [shape = box, style = filled, fillcolor = '#FFFFFF',
           color = '#333333', fontname = 'Helvetica', width = 20.0]
 
-    kmeans       [label = 'k-means',            group = 'col4', fontsize = 105]
-    desc_results [label = 'Análise Descritiva', group = 'col4', fontsize = 105]
+    kmeans       [label = 'k-means',            group = 'col4', fontsize = 125]
+    desc_results [label = 'Análise Descritiva', group = 'col4', fontsize = 125]
   }
 
   // ----------------------------------------------------
@@ -199,16 +204,9 @@ digraph flowchart {
 #
 #
 
-# Instale uma vez, se necessário:
-install.packages(c("DiagrammeR", "DiagrammeRsvg", "rsvg"))
-
-library(DiagrammeR)
-library(DiagrammeRsvg)
-library(rsvg)
-
 # 1. Seu diagrama
 gr <- grViz(
-  "
+      "
 digraph flowchart {
   graph [layout = dot, rankdir = TB,
          nodesep = 5.0, ranksep = 3,
@@ -344,8 +342,8 @@ altura_cm <- 14 # ajuste conforme a proporção do diagrama
 dpi <- 600 # 300 para submissão, 600 para impressão
 
 rsvg_png(
-  charToRaw(svg_code),
-  file = "figura_fluxograma.png",
-  width = round(largura_cm / 2.54 * dpi),
-  height = round(altura_cm / 2.54 * dpi)
+      charToRaw(svg_code),
+      file = "figura_fluxograma.png",
+      width = round(largura_cm / 2.54 * dpi),
+      height = round(altura_cm / 2.54 * dpi)
 )
